@@ -1828,6 +1828,46 @@ export interface KnowledgeGitNexus {
   commitRefCount: number;
   fileToNotes: KnowledgeGitFileLink[];
   commitToNotes: KnowledgeGitCommitLink[];
+  missingCodeRefs: KnowledgeGitFileLink[];
+  missingCommitRefs: KnowledgeGitCommitLink[];
+}
+
+export interface KnowledgeWorkStateTask {
+  id: string;
+  title: string;
+  status: string;
+  assignee: string | null;
+  priority: number;
+  blockedReason: string | null;
+  blockKind: string | null;
+  sessionId: string | null;
+  branchName: string | null;
+  workspacePath: string | null;
+  parents: string[];
+  children: string[];
+  latestRunSummary: string | null;
+  verification: unknown;
+  links: {
+    files: string[];
+    commits: string[];
+    sessions: string[];
+    notes: string[];
+  };
+}
+
+export interface KnowledgeWorkState {
+  available: boolean;
+  board: string | null;
+  dbPath: string | null;
+  tasks: KnowledgeWorkStateTask[];
+  counts: {
+    total: number;
+    blocked: number;
+    running: number;
+    ready: number;
+    review: number;
+  };
+  warning: string | null;
 }
 
 export interface KnowledgeStatusResponse {
@@ -1852,6 +1892,7 @@ export interface KnowledgeStatusResponse {
   warnings: string[];
   sampleBrokenLinks: string[];
   gitNexus: KnowledgeGitNexus;
+  workState: KnowledgeWorkState;
   scanLimit: number;
 }
 

@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -2079,6 +2080,21 @@ def _knowledge_git(args: list[str], cwd: Path) -> str:
     return completed.stdout
 
 
+def _knowledge_git_ok(args: list[str], cwd: Path) -> bool:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def _knowledge_git_status(git_root: Path) -> list[dict[str, str]]:
     output = _knowledge_git(["status", "--porcelain=v1", "-z"], git_root)
     files: list[dict[str, str]] = []
@@ -2140,6 +2156,16 @@ def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
         {"commit": commit, "notes": sorted(notes)[:8]}
         for commit, notes in sorted(commit_to_notes.items())[:25]
     ]
+    missing_code_refs = [
+        {"file": file_ref, "notes": sorted(notes)[:8]}
+        for file_ref, notes in sorted(file_to_notes.items())[:25]
+        if git_root and not (git_root / file_ref).exists()
+    ]
+    missing_commit_refs = [
+        {"commit": commit, "notes": sorted(notes)[:8]}
+        for commit, notes in sorted(commit_to_notes.items())[:25]
+        if git_root and not _knowledge_git_ok(["cat-file", "-e", f"{commit}^{{commit}}"], git_root)
+    ]
 
     return {
         "gitRoot": str(git_root) if git_root else None,
@@ -2150,6 +2176,145 @@ def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
         "commitRefCount": commit_ref_count,
         "fileToNotes": reverse_links,
         "commitToNotes": commit_links,
+        "missingCodeRefs": missing_code_refs,
+        "missingCommitRefs": missing_commit_refs,
+    }
+
+
+_KNOWLEDGE_WORK_LINK_RE = re.compile(
+    r"(?P<file>(?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]+)"
+    r"|(?P<commit>\b[0-9a-f]{7,40}\b)"
+    r"|(?P<session>\b\d{8}_\d{6}_[0-9a-f]{6}\b)"
+    r"|(?P<note>\[\[([^\]]+)\]\])"
+)
+
+
+def _knowledge_work_links(*texts: str | None) -> dict[str, list[str]]:
+    links: dict[str, set[str]] = {"files": set(), "commits": set(), "sessions": set(), "notes": set()}
+    for text in texts:
+        if not text:
+            continue
+        for match in _KNOWLEDGE_WORK_LINK_RE.finditer(text):
+            if match.group("file"):
+                links["files"].add(match.group("file").replace("\\", "/"))
+            elif match.group("commit"):
+                links["commits"].add(match.group("commit"))
+            elif match.group("session"):
+                links["sessions"].add(match.group("session"))
+            elif match.group("note"):
+                note = match.group(5) or ""
+                if note.strip():
+                    links["notes"].add(note.strip())
+    return {key: sorted(values)[:6] for key, values in links.items()}
+
+
+def _knowledge_empty_work_state(board: str | None, db_path: Path | None, warning: str) -> dict[str, Any]:
+    return {
+        "available": False,
+        "board": board,
+        "dbPath": str(db_path) if db_path else None,
+        "tasks": [],
+        "counts": {"total": 0, "blocked": 0, "running": 0, "ready": 0, "review": 0},
+        "warning": warning,
+    }
+
+
+def _knowledge_work_state() -> dict[str, Any]:
+    """Return a read-only Kanban-backed work-state summary for Knowledge Hub."""
+    try:
+        from hermes_cli import kanban_db as kb
+
+        board = kb.get_current_board()
+        db_path = kb.kanban_db_path(board=board)
+    except Exception as exc:
+        return _knowledge_empty_work_state(None, None, f"Kanban path unavailable: {exc}")
+
+    if not db_path.is_file():
+        return _knowledge_empty_work_state(board, db_path, "Kanban board has not been initialized yet.")
+
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+                t.id, t.title, t.body, t.status, t.assignee, t.priority,
+                t.block_kind, t.last_failure_error, t.result, t.session_id,
+                t.branch_name, t.workspace_path, t.created_at,
+                (SELECT GROUP_CONCAT(parent_id) FROM task_links WHERE child_id = t.id) AS parents,
+                (SELECT GROUP_CONCAT(child_id) FROM task_links WHERE parent_id = t.id) AS children,
+                r.summary AS run_summary,
+                r.metadata AS run_metadata
+            FROM tasks t
+            LEFT JOIN task_runs r ON r.id = (
+                SELECT id FROM task_runs WHERE task_id = t.id ORDER BY started_at DESC, id DESC LIMIT 1
+            )
+            WHERE t.status != 'archived'
+            ORDER BY
+                CASE t.status
+                    WHEN 'blocked' THEN 0
+                    WHEN 'running' THEN 1
+                    WHEN 'ready' THEN 2
+                    WHEN 'review' THEN 3
+                    ELSE 4
+                END,
+                t.priority DESC,
+                t.created_at ASC
+            LIMIT 8
+            """
+        ).fetchall()
+        counts_rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM tasks WHERE status != 'archived' GROUP BY status"
+        ).fetchall()
+    except Exception as exc:
+        return _knowledge_empty_work_state(board, db_path, f"Kanban board could not be read: {exc}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    by_status = {row["status"]: int(row["n"]) for row in counts_rows}
+    counts = {
+        "total": sum(by_status.values()),
+        "blocked": by_status.get("blocked", 0),
+        "running": by_status.get("running", 0),
+        "ready": by_status.get("ready", 0),
+        "review": by_status.get("review", 0),
+    }
+    tasks: list[dict[str, Any]] = []
+    for row in rows:
+        metadata: Any = None
+        if row["run_metadata"]:
+            try:
+                metadata = json.loads(row["run_metadata"])
+            except Exception:
+                metadata = None
+        tasks.append(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "status": row["status"],
+                "assignee": row["assignee"],
+                "priority": row["priority"] or 0,
+                "blockedReason": row["last_failure_error"] if row["status"] == "blocked" else None,
+                "blockKind": row["block_kind"],
+                "sessionId": row["session_id"],
+                "branchName": row["branch_name"],
+                "workspacePath": row["workspace_path"],
+                "parents": [item for item in (row["parents"] or "").split(",") if item],
+                "children": [item for item in (row["children"] or "").split(",") if item],
+                "latestRunSummary": row["run_summary"],
+                "verification": metadata.get("verification") if isinstance(metadata, dict) else None,
+                "links": _knowledge_work_links(row["title"], row["body"], row["result"], row["run_summary"]),
+            }
+        )
+    return {
+        "available": True,
+        "board": board,
+        "dbPath": str(db_path),
+        "tasks": tasks,
+        "counts": counts,
+        "warning": None,
     }
 
 
@@ -2248,6 +2413,7 @@ def _knowledge_status_for(vault: Path, requested_path: str | None) -> Dict[str, 
         "warnings": warnings,
         "sampleBrokenLinks": sorted(broken_links)[:10],
         "gitNexus": _knowledge_git_nexus(root, files),
+        "workState": _knowledge_work_state(),
         "scanLimit": _KNOWLEDGE_MAX_MARKDOWN_FILES,
     }
 
