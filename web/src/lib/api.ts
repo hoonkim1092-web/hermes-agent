@@ -1828,6 +1828,8 @@ export interface KnowledgeGitNexus {
   commitRefCount: number;
   fileToNotes: KnowledgeGitFileLink[];
   commitToNotes: KnowledgeGitCommitLink[];
+  missingCodeRefs: KnowledgeGitFileLink[];
+  missingCommitRefs: KnowledgeGitCommitLink[];
 }
 
 export interface KnowledgeStatusResponse {

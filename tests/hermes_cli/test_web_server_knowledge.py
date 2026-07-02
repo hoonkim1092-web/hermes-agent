@@ -30,6 +30,7 @@ def client():
 
 def test_knowledge_status_reports_read_only_vault_health(client, tmp_path):
     vault = tmp_path / "docs" / "wiki"
+    initial_sha = "deadbeef"
     if shutil.which("git"):
         subprocess.run(["git", "init"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
@@ -37,6 +38,7 @@ def test_knowledge_status_reports_read_only_vault_health(client, tmp_path):
         (tmp_path / "run_agent.py").write_text("print('hello')\n", encoding="utf-8")
         subprocess.run(["git", "add", "run_agent.py"], cwd=tmp_path, check=True)
         subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+        initial_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
     (vault / "inbox" / "sources").mkdir(parents=True)
     (vault / "raw" / "sessions").mkdir(parents=True)
     (vault / "knowledge" / "concepts").mkdir(parents=True)
@@ -51,7 +53,10 @@ def test_knowledge_status_reports_read_only_vault_health(client, tmp_path):
         "  - raw/sessions/s1.md\n"
         "code_refs:\n"
         "  - run_agent.py:1\n"
-        "created_commit: abc123\n"
+        "  - missing.py:42\n"
+        "created_commit:\n"
+        "  - abc123\n"
+        f"  - {initial_sha}\n"
         "---\n"
         "# Agent Runtime\n"
         "See [[missing-note]].\n",
@@ -71,10 +76,17 @@ def test_knowledge_status_reports_read_only_vault_health(client, tmp_path):
     assert body["counts"]["notesWithCommitRefs"] == 1
     assert body["counts"]["brokenLinks"] == 1
     assert body["sampleBrokenLinks"] == ["missing-note"]
-    assert body["gitNexus"]["codeRefCount"] == 1
-    assert body["gitNexus"]["commitRefCount"] == 1
+    assert body["gitNexus"]["codeRefCount"] == 2
+    assert body["gitNexus"]["commitRefCount"] == 2
     assert body["gitNexus"]["fileToNotes"] == [
-        {"file": "run_agent.py", "notes": ["knowledge/concepts/agent-runtime.md"]}
+        {"file": "missing.py", "notes": ["knowledge/concepts/agent-runtime.md"]},
+        {"file": "run_agent.py", "notes": ["knowledge/concepts/agent-runtime.md"]},
+    ]
+    assert body["gitNexus"]["missingCodeRefs"] == [
+        {"file": "missing.py", "notes": ["knowledge/concepts/agent-runtime.md"]}
+    ]
+    assert body["gitNexus"]["missingCommitRefs"] == [
+        {"commit": "abc123", "notes": ["knowledge/concepts/agent-runtime.md"]}
     ]
     if shutil.which("git"):
         assert body["gitNexus"]["isGitRepo"] is True

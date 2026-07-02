@@ -92,7 +92,16 @@ const PHASES: PhaseCard[] = [
     ],
   },
   {
-    title: "MVP 3 — Safe proposals",
+    title: "MVP 3 — Stale/skew checks",
+    status: "Applied now",
+    items: [
+      "Missing code_refs",
+      "Missing created_commit refs",
+      "Read-only warning surface",
+    ],
+  },
+  {
+    title: "MVP 4 — Safe proposals",
     status: "Planned",
     items: [
       "Process inbox into proposed diffs",
@@ -333,9 +342,9 @@ export default function KnowledgePage() {
             </h3>
           </div>
           <ol className="grid gap-2 text-sm leading-6 text-muted-foreground md:grid-cols-2">
-            <li>1. Add Git Nexus reverse links from file paths to notes and sessions.</li>
-            <li>2. Show timeline tabs for commits, reviews, sessions, and knowledge updates.</li>
-            <li>3. Add stale/skew checks for code_refs and created_commit metadata.</li>
+            <li>1. Add timeline tabs for commits, reviews, sessions, and knowledge updates.</li>
+            <li>2. Add richer commit-to-note and session-to-note reverse links.</li>
+            <li>3. Promote stale/skew warnings into proposed repair diffs.</li>
             <li>4. Add proposal/diff flow before any risky write.</li>
           </ol>
         </CardContent>
@@ -418,6 +427,9 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
   const latestCommits = nexus.recentCommits.slice(0, 4);
   const dirtyFiles = nexus.dirtyFiles.slice(0, 6);
   const linkedFiles = nexus.fileToNotes.slice(0, 6);
+  const missingCodeRefs = nexus.missingCodeRefs.slice(0, 6);
+  const missingCommitRefs = nexus.missingCommitRefs.slice(0, 6);
+  const staleCount = nexus.missingCodeRefs.length + nexus.missingCommitRefs.length;
 
   return (
     <Card>
@@ -434,16 +446,18 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
               {nexus.gitRoot ?? "No git repository found above the vault"}
             </p>
           </div>
-          <Badge tone={nexus.isGitRepo ? "success" : "outline"} className="shrink-0 text-xs">
-            {nexus.isGitRepo ? "Indexed" : "No repo"}
+          <Badge tone={nexus.isGitRepo && staleCount === 0 ? "success" : "outline"} className="shrink-0 text-xs">
+            {nexus.isGitRepo ? (staleCount === 0 ? "Indexed" : `${staleCount} stale refs`) : "No repo"}
           </Badge>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
           <Metric label="Dirty files" value={nexus.dirtyFiles.length} />
           <Metric label="Recent commits" value={nexus.recentCommits.length} />
           <Metric label="code_refs" value={nexus.codeRefCount} />
           <Metric label="commit refs" value={nexus.commitRefCount} />
+          <Metric label="Missing files" value={nexus.missingCodeRefs.length} />
+          <Metric label="Missing commits" value={nexus.missingCommitRefs.length} />
         </div>
 
         <div className="grid gap-4 xl:grid-cols-3">
@@ -464,6 +478,21 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
             title="File → notes"
             empty="No code_refs reverse links yet."
             items={linkedFiles.map((link) => `${link.file} → ${link.notes.join(", ")}`)}
+          />
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <NexusList
+            icon={AlertTriangle}
+            title="Missing code_refs"
+            empty="All code_refs resolve to files in the git root."
+            items={missingCodeRefs.map((link) => `${link.file} → ${link.notes.join(", ")}`)}
+          />
+          <NexusList
+            icon={AlertTriangle}
+            title="Missing commit refs"
+            empty="All created_commit refs resolve to local commits."
+            items={missingCommitRefs.map((link) => `${link.commit} → ${link.notes.join(", ")}`)}
           />
         </div>
       </CardContent>

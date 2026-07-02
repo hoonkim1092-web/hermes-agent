@@ -172,8 +172,9 @@ or the active project `docs/wiki` path. It reports vault existence,
 `SCHEMA.md`/`index.md`/`log.md` health, markdown/inbox/raw counts,
 frontmatter usage, broken wikilinks, orphan candidates, and an embedded
 read-only Git Nexus summary: nearest git root, dirty files, recent commits,
-parsed `code_refs` / `created_commit`, and file-to-note reverse links. It performs no
-writes.
+parsed `code_refs` / `created_commit`, file-to-note reverse links, and
+read-only stale/skew checks for missing referenced files or missing local
+commits. It performs no writes.
 
 ### Automation
 
@@ -271,15 +272,21 @@ Phase 3 adds automation:
 
 - Extend `/api/knowledge/status` with an embedded `gitNexus` summary returning git status, recent commits, parsed `code_refs`, `created_commit`, and reverse file-to-note links.
 - Show the Git Nexus summary card in the dashboard.
+
+### MVP 3: Stale/skew read-only checks
+
+- Flag `code_refs` whose referenced file is missing under the nearest git root.
+- Flag `created_commit` values that do not resolve to a local commit.
+- Surface both warning lists in the Git Nexus dashboard card without attempting repairs.
 - Keep Timeline, Files, Commits, and Knowledge Links tabs as the next richer UX slice.
 
-### MVP 3: Safe proposals
+### MVP 4: Safe proposals
 
 - Add inbox item processing that produces a diff proposal.
 - Allow apply-safe, review-diff, revise, and skip.
 - Block destructive changes behind explicit confirmation.
 
-### MVP 4: Automation
+### MVP 5: Automation
 
 - Add dashboard buttons that create cron jobs for inbox processing, daily doctor, and weekly report.
 - Use existing cron job storage and prompts; do not create a new scheduler.

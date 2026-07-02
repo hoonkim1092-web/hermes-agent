@@ -2079,6 +2079,21 @@ def _knowledge_git(args: list[str], cwd: Path) -> str:
     return completed.stdout
 
 
+def _knowledge_git_ok(args: list[str], cwd: Path) -> bool:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def _knowledge_git_status(git_root: Path) -> list[dict[str, str]]:
     output = _knowledge_git(["status", "--porcelain=v1", "-z"], git_root)
     files: list[dict[str, str]] = []
@@ -2140,6 +2155,16 @@ def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
         {"commit": commit, "notes": sorted(notes)[:8]}
         for commit, notes in sorted(commit_to_notes.items())[:25]
     ]
+    missing_code_refs = [
+        {"file": file_ref, "notes": sorted(notes)[:8]}
+        for file_ref, notes in sorted(file_to_notes.items())[:25]
+        if git_root and not (git_root / file_ref).exists()
+    ]
+    missing_commit_refs = [
+        {"commit": commit, "notes": sorted(notes)[:8]}
+        for commit, notes in sorted(commit_to_notes.items())[:25]
+        if git_root and not _knowledge_git_ok(["cat-file", "-e", f"{commit}^{{commit}}"], git_root)
+    ]
 
     return {
         "gitRoot": str(git_root) if git_root else None,
@@ -2150,6 +2175,8 @@ def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
         "commitRefCount": commit_ref_count,
         "fileToNotes": reverse_links,
         "commitToNotes": commit_links,
+        "missingCodeRefs": missing_code_refs,
+        "missingCommitRefs": missing_commit_refs,
     }
 
 
