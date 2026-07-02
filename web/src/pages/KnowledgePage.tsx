@@ -46,19 +46,19 @@ const SUMMARY_CARDS: SummaryCard[] = [
   {
     title: "Knowledge Hub",
     description:
-      "Inbox-driven organizer for sources, sessions, reviews, and handoff notes. It writes to an Obsidian-compatible LLM Wiki, not a new database.",
+      "Inbox-driven organizer for sources, work state, sessions, reviews, and handoff notes. It writes to an Obsidian-compatible LLM Wiki, not a new database.",
     icon: BookOpen,
   },
   {
     title: "Git Nexus",
     description:
-      "Code-centered index connecting commits, files, symbols, sessions, reviews, NEXT_STEPS, and knowledge notes.",
+      "Code-centered index connecting commits, files, symbols, sessions, reviews, work-state tasks, optional handoff exports, and knowledge notes.",
     icon: GitBranch,
   },
   {
     title: "Thin orchestration",
     description:
-      "Uses existing Hermes skills, file tools, session search, cron, and kanban instead of adding another agent runtime.",
+      "Uses existing Hermes skills, file tools, session search, cron, Kanban, and Todo instead of adding another agent runtime or task database.",
     icon: Workflow,
   },
 ];
@@ -101,12 +101,12 @@ const PHASES: PhaseCard[] = [
     ],
   },
   {
-    title: "MVP 4 — Safe proposals",
+    title: "MVP 4 — Work-state links",
     status: "Planned",
     items: [
-      "Process inbox into proposed diffs",
-      "Apply safe changes",
-      "Require approval for risky edits",
+      "Read existing Kanban tasks",
+      "Show blocked decisions and next actions",
+      "Treat Todo as current-session focus",
     ],
   },
 ];
@@ -120,17 +120,17 @@ const GUARDRAILS: GuardrailCard[] = [
   {
     title: "Diff first for risky edits",
     description:
-      "Existing notes, NEXT_STEPS, archive/delete actions, and confidence upgrades require review before apply.",
+      "Existing notes, NEXT_STEPS exports, archive/delete actions, and confidence upgrades require review before apply.",
   },
   {
     title: "Git Nexus is an index",
     description:
-      "Truth stays in git, the session DB, reviews, and markdown. Nexus connects them; it does not replace them.",
+      "Truth stays in git, Kanban, session Todo context, the session DB, reviews, and markdown. Nexus connects them; it does not replace them.",
   },
 ];
 
 const VAULT_TREE = String.raw`repo/
-├── NEXT_STEPS.md
+├── NEXT_STEPS.md  # optional export, not task truth
 └── docs/wiki/
     ├── SCHEMA.md
     ├── index.md
@@ -232,6 +232,7 @@ export default function KnowledgePage() {
 
       {status && <VaultStatus status={status} loading={loading} />}
       {status && <GitNexusStatus status={status} />}
+      {status && <WorkStateStatus status={status} />}
 
       <section className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <Card>
@@ -244,10 +245,10 @@ export default function KnowledgePage() {
                 Organic knowledge organization for Hermes projects
               </h2>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                Turn dropped sources, prior sessions, review output, and project
-                handoff notes into a linked markdown vault. Obsidian remains the
-                human graph/editor; Hermes manages inbox processing, provenance,
-                stale checks, and automation.
+                Turn dropped sources, work state, prior sessions, review output,
+                and project handoff notes into a linked markdown vault. Obsidian
+                remains the human graph/editor; Hermes manages inbox processing,
+                provenance, stale checks, and automation.
               </p>
             </div>
 
@@ -270,10 +271,11 @@ export default function KnowledgePage() {
             <div className="rounded border border-border bg-background/50 p-3 font-mono-ui text-xs leading-5 text-muted-foreground">
               <p>commit / diff / branch</p>
               <p className="pl-4">-&gt; files and symbols</p>
+              <p className="pl-4">-&gt; Kanban tasks and current-session todos</p>
               <p className="pl-4">-&gt; sessions</p>
               <p className="pl-4">-&gt; reviews</p>
               <p className="pl-4">-&gt; knowledge notes</p>
-              <p className="pl-4">-&gt; NEXT_STEPS</p>
+              <p className="pl-4">-&gt; NEXT_STEPS export</p>
             </div>
             <p className="text-sm leading-6 text-muted-foreground">
               The goal is code archaeology: show why a file changed, which
@@ -342,10 +344,10 @@ export default function KnowledgePage() {
             </h3>
           </div>
           <ol className="grid gap-2 text-sm leading-6 text-muted-foreground md:grid-cols-2">
-            <li>1. Add timeline tabs for commits, reviews, sessions, and knowledge updates.</li>
-            <li>2. Add richer commit-to-note and session-to-note reverse links.</li>
-            <li>3. Promote stale/skew warnings into proposed repair diffs.</li>
-            <li>4. Add proposal/diff flow before any risky write.</li>
+            <li>1. Add a read-only Work State panel backed by existing Kanban data.</li>
+            <li>2. Link tasks to files, commits, sessions, reviews, and notes without a new task DB.</li>
+            <li>3. Show Todo only as current-session focus when that context is available.</li>
+            <li>4. Keep proposal/diff writes for a later slice after the read-only links are clear.</li>
           </ol>
         </CardContent>
       </Card>
@@ -493,6 +495,71 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
             title="Missing commit refs"
             empty="All created_commit refs resolve to local commits."
             items={missingCommitRefs.map((link) => `${link.commit} → ${link.notes.join(", ")}`)}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkStateStatus({ status }: { status: KnowledgeStatusResponse }) {
+  const work = status.workState;
+  const taskLines = work.tasks.map((task) => {
+    const owner = task.assignee ? ` @${task.assignee}` : "";
+    const links = task.links.files.length + task.links.commits.length + task.links.sessions.length + task.links.notes.length;
+    const suffix = links ? ` · ${links} link${links === 1 ? "" : "s"}` : "";
+    return `${task.id} [${task.status}]${owner} ${task.title}${suffix}`;
+  });
+  const blockedLines = work.tasks
+    .filter((task) => task.status === "blocked")
+    .map((task) => `${task.id}: ${task.blockedReason || task.blockKind || "blocked"}`);
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 py-5">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <Workflow className="h-4 w-4 text-muted-foreground" />
+              <h3 className="font-sans text-display text-sm uppercase tracking-[0.16em] text-foreground">
+                Work State
+              </h3>
+            </div>
+            <p className="truncate font-mono-ui text-xs text-muted-foreground">
+              {work.dbPath ?? "Kanban data unavailable"}
+            </p>
+          </div>
+          <Badge tone={work.available ? "success" : "outline"} className="shrink-0 text-xs">
+            {work.available ? `Board: ${work.board ?? "default"}` : "Unavailable"}
+          </Badge>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-5">
+          <Metric label="Tasks" value={work.counts.total} />
+          <Metric label="Blocked" value={work.counts.blocked} />
+          <Metric label="Running" value={work.counts.running} />
+          <Metric label="Ready" value={work.counts.ready} />
+          <Metric label="Review" value={work.counts.review} />
+        </div>
+
+        {work.warning && (
+          <p className="rounded border border-border bg-background/40 p-3 text-sm leading-6 text-muted-foreground">
+            {work.warning}
+          </p>
+        )}
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <NexusList
+            icon={Workflow}
+            title="Kanban tasks"
+            empty="No active Kanban tasks found."
+            items={taskLines}
+          />
+          <NexusList
+            icon={AlertTriangle}
+            title="Blocked decisions"
+            empty="No blocked Kanban tasks in the current summary."
+            items={blockedLines}
           />
         </div>
       </CardContent>

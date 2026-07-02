@@ -5,17 +5,19 @@ sidebar_label: Knowledge Hub
 
 # Knowledge Hub and Git Nexus
 
-Knowledge Hub is a proposed dashboard workflow for turning sources, session history, review output, and project handoff notes into an Obsidian-compatible LLM Wiki. Git Nexus is the code-centered companion view that connects those notes back to commits, files, symbols, reviews, sessions, and next steps.
+Knowledge Hub is a proposed dashboard workflow for turning sources, work state, session history, review output, and project handoff notes into an Obsidian-compatible LLM Wiki. Git Nexus is the code-centered companion view that connects those notes back to commits, files, symbols, reviews, sessions, work-state tasks, and optional handoff exports.
 
-The feature is intentionally thin: it should not add a second agent runtime, a new core orchestration loop, or a new memory database. It should use Hermes's existing primitives: dashboard pages, skills, file/search tools, session search, cron jobs, kanban, and project-local markdown files.
+The feature is intentionally thin: it should not add a second agent runtime, a new core orchestration loop, a new task database, or a new memory database. It should use Hermes's existing primitives: dashboard pages, skills, file/search tools, session search, cron jobs, kanban, the per-session todo tool, and project-local markdown files.
 
 ## Goals
 
 - Make it easy to drop material into an inbox and ask Hermes to organize it.
 - Keep raw sources immutable and separate from synthesized wiki pages.
 - Preserve provenance for claims, code references, sessions, reviews, and commits.
+- Treat Hermes Kanban as the durable work-state source of truth, with the per-session Todo list as active in-session focus.
 - Provide safe automation: propose diffs first, auto-apply only low-risk changes, and require approval for destructive or high-confidence-changing edits.
 - Surface stale or skewed knowledge when referenced code moves or referenced commits are missing locally.
+- Use `NEXT_STEPS.md` only as a human-readable export or handoff view, not as a second task registry.
 - Let Obsidian remain the human browsing/editing UI while the dashboard acts as the agent control plane.
 
 ## Non-goals
@@ -25,6 +27,8 @@ The feature is intentionally thin: it should not add a second agent runtime, a n
 - Do not replace Obsidian or the existing file browser.
 - Do not silently delete notes, overwrite contested claims, or rewrite handoff files without review.
 - Do not make Git Nexus a new source of truth. It is an index over git, sessions, reviews, and markdown.
+- Do not recreate AF-style `NEXT_STEPS.md` ownership as a new Hermes file or DB. Kanban/Todo already owns work state.
+- Do not add `.hermes/project_state/tasks.json`, a parallel task registry, or another work queue for Knowledge Hub.
 
 ## Concept summary
 
@@ -33,8 +37,24 @@ The feature is intentionally thin: it should not add a second agent runtime, a n
 | Knowledge Hub | Ingest, classify, propose wiki updates, run wiki health checks | Markdown vault + Hermes skills/tools |
 | LLM Wiki | Schema, index, log, raw sources, entity/concept/query pages | Obsidian-compatible markdown |
 | Obsidian | Human graph view, editing, Dataview queries, sync | Same markdown vault |
-| Git Nexus | Connect notes to files, symbols, commits, sessions, reviews, and NEXT_STEPS | Git + session DB + markdown refs |
+| Work State | Current task status, blocked decisions, next actions, assignees, handoffs | Hermes Kanban + per-session Todo context |
+| Git Nexus | Connect notes to files, symbols, commits, sessions, reviews, and work state | Git + session DB + Kanban + Todo context + markdown refs |
 | Automation | Scheduled inbox processing, stale checks, weekly health reports | Hermes cron/kanban |
+
+## Work-state source of truth
+
+Knowledge Hub should read from the existing Hermes work primitives instead of inventing a second project task system.
+
+| Primitive | Role in the graph | Notes |
+| --- | --- | --- |
+| Kanban | Durable project work state: status, blocked decisions, next actions, assignee, priority, task links, comments, run summaries, verification metadata | Primary source for anything that must survive sessions, restarts, and worker handoffs. |
+| Todo | Active single-session focus list: what the current agent is doing right now | Useful as a live focus signal and compression-surviving checklist, but not cross-session durable project state. |
+| Git/GitHub | Branches, commits, PRs, changed files, review gates | Code truth and delivery provenance. |
+| Session DB | Conversation originals and decision rationale | Evidence source, not a task board. |
+| docs/wiki | Durable decisions, architecture notes, incidents, code notes, claim/evidence/implication pages | Knowledge truth, not current task status. |
+| `NEXT_STEPS.md` | Optional human-readable export/handoff generated from Kanban, Todo, git, sessions, and docs | A view, not the source of truth. Editing it should not be the primary way to mutate work state. |
+
+Dashboard rule: if a screen asks “what is next, who owns it, why is it blocked, what verified it?”, it should read Kanban first, enrich with Todo/session/git/wiki links when available, and only then offer an export/handoff view.
 
 ## Recommended vault shape
 
@@ -42,7 +62,7 @@ For a project-local vault:
 
 ```text
 repo/
-├── NEXT_STEPS.md
+├── NEXT_STEPS.md        # optional human export, not task truth
 └── docs/wiki/
     ├── SCHEMA.md
     ├── index.md
@@ -51,7 +71,7 @@ repo/
     │   ├── sources/
     │   ├── sessions/
     │   ├── reviews/
-    │   └── tasks/
+    │   └── tasks/       # captured task artifacts only; live state stays in Kanban
     ├── raw/
     │   ├── sources/
     │   ├── sessions/
@@ -165,6 +185,7 @@ The dashboard should show:
 - Orphan notes.
 - Low-confidence and contested notes.
 - Stale/skewed code references.
+- Linked Kanban/Todo work-state signals without mutating them.
 
 The first read-only slice is `/api/knowledge/status`. It accepts an optional
 `path` query parameter; without one it scans `WIKI_PATH`, `OBSIDIAN_VAULT_PATH`,
@@ -193,10 +214,11 @@ Git Nexus connects the project graph:
 ```text
 commit / diff / branch / PR
   -> files and symbols
+  -> Kanban tasks and current-session todos
   -> sessions
   -> reviews
   -> knowledge notes
-  -> NEXT_STEPS items
+  -> NEXT_STEPS export/handoff view
 ```
 
 Primary views:
@@ -207,7 +229,7 @@ Primary views:
 4. Sessions — promote a session into wiki notes or attach it to a commit/task.
 5. Reviews — PASS/WARN/BLOCK history and linked diffs.
 6. Knowledge Links — `code_refs`, `created_commit`, source refs, and stale candidates.
-7. NEXT_STEPS — handoff tasks enriched with related files, notes, commits, and sessions.
+7. Work State — Kanban tasks and current-session todos enriched with related files, notes, commits, reviews, sessions, and optional NEXT_STEPS export lines.
 
 Example file view:
 
@@ -236,6 +258,8 @@ Phase 1 can be read-only and filesystem-backed:
 - Parse frontmatter conservatively with existing YAML dependencies.
 - Extract `[[wikilinks]]`, `code_refs`, `sources`, and `created_commit`.
 - Read git status/history through the terminal/backend process, not browser JS.
+- Read durable task state through the existing Kanban DB/API layer; do not create a second Knowledge Hub task table.
+- Treat the per-session Todo list as an active-session signal only unless a session export includes it.
 - Read sessions through the existing session DB APIs.
 - Return summaries for the dashboard page.
 
@@ -280,13 +304,29 @@ Phase 3 adds automation:
 - Surface both warning lists in the Git Nexus dashboard card without attempting repairs.
 - Keep Timeline, Files, Commits, and Knowledge Links tabs as the next richer UX slice.
 
-### MVP 4: Safe proposals
+### MVP 4: Kanban/Todo read-only work-state links
+
+- Extend the Knowledge/Git Nexus dashboard with a read-only work-state section backed by existing Kanban board data.
+- Show task status, blocked items, current next actions, assignees, parent/child links, latest completed run summaries, and verification metadata when available.
+- Link tasks to files/commits/notes/sessions using existing task body, comments, run metadata, and git refs; avoid adding a new task registry or schema unless a small optional link field is proven necessary.
+- If current session Todo data is available in the active agent/session context, display it as "current focus" rather than durable project truth.
+
+#### Work list
+
+1. Inspect the existing Kanban CLI/API/storage shape and pick the narrowest read-only integration point for the dashboard backend.
+2. Add a read-only backend summary for work state: task id/title/status, blocked reason, next action, assignee, priority, linked files/commits/sessions/notes, latest run summary, and verification metadata when present.
+3. Keep Todo separate: expose it only when current-session context is available, label it as active focus, and never persist it as project truth.
+4. Add a compact Work State panel to `KnowledgePage.tsx` that consumes the read-only summary and degrades cleanly when Kanban or Todo data is unavailable.
+5. Add/extend tests for the backend summary: empty board, blocked task, task with links, missing Kanban data, and read-only/no-write behavior.
+6. Update docs/dashboard copy only as needed; do not add `.hermes/project_state/tasks.json`, a markdown task registry, or a new work queue.
+
+### MVP 5: Safe proposals
 
 - Add inbox item processing that produces a diff proposal.
 - Allow apply-safe, review-diff, revise, and skip.
 - Block destructive changes behind explicit confirmation.
 
-### MVP 5: Automation
+### MVP 6: Automation
 
 - Add dashboard buttons that create cron jobs for inbox processing, daily doctor, and weekly report.
 - Use existing cron job storage and prompts; do not create a new scheduler.
@@ -297,6 +337,8 @@ Phase 3 adds automation:
 - Existing notes are patched, not blindly rewritten.
 - Destructive actions require approval.
 - `NEXT_STEPS.md` edits require approval by default.
+- Kanban remains the durable work-state source of truth; Todo is session focus; `NEXT_STEPS.md` is an export/handoff view.
+- Do not introduce a parallel task DB, `.hermes/project_state/tasks.json`, or markdown task registry for Knowledge Hub.
 - Confidence upgrades require evidence from multiple sources or user approval.
 - Stale/skew findings are advisory until explicitly applied.
 - The page must work without Obsidian installed because the vault is plain markdown.

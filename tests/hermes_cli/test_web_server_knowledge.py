@@ -1,10 +1,13 @@
 from pathlib import Path
+import json
 import shutil
 import subprocess
+import time
 
 import pytest
 
 from hermes_cli import web_server
+from hermes_cli import kanban_db
 
 pytest.importorskip("starlette.testclient")
 from starlette.testclient import TestClient
@@ -28,7 +31,8 @@ def client():
             web_server.app.state.auth_required = previous
 
 
-def test_knowledge_status_reports_read_only_vault_health(client, tmp_path):
+def test_knowledge_status_reports_read_only_vault_health(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "missing-kanban.db"))
     vault = tmp_path / "docs" / "wiki"
     initial_sha = "deadbeef"
     if shutil.which("git"):
@@ -92,9 +96,12 @@ def test_knowledge_status_reports_read_only_vault_health(client, tmp_path):
         assert body["gitNexus"]["isGitRepo"] is True
         assert body["gitNexus"]["gitRoot"] == str(tmp_path.resolve())
         assert body["gitNexus"]["recentCommits"][0]["subject"] == "initial"
+    assert body["workState"]["available"] is False
+    assert body["workState"]["counts"]["total"] == 0
 
 
 def test_knowledge_status_defaults_to_project_docs_wiki(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "missing-kanban.db"))
     vault = tmp_path / "repo" / "docs" / "wiki"
     vault.mkdir(parents=True)
     (vault / "SCHEMA.md").write_text("# Schema\n", encoding="utf-8")
@@ -107,6 +114,72 @@ def test_knowledge_status_defaults_to_project_docs_wiki(client, tmp_path, monkey
     assert body["requestedPath"] is None
     assert Path(body["vaultPath"]) == vault.resolve()
     assert body["exists"] is True
+
+
+def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path, monkeypatch):
+    vault = tmp_path / "docs" / "wiki"
+    vault.mkdir(parents=True)
+    (vault / "SCHEMA.md").write_text("# Schema\n", encoding="utf-8")
+    (vault / "index.md").write_text("# Index\n", encoding="utf-8")
+    (vault / "log.md").write_text("# Log\n", encoding="utf-8")
+    db_path = tmp_path / "kanban.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+
+    conn = kanban_db.connect(db_path=db_path)
+    try:
+        parent_id = kanban_db.create_task(
+            conn,
+            title="Prepare work-state links",
+            body="Touch web/src/pages/KnowledgePage.tsx and [[Work State]].",
+            assignee="default",
+            priority=3,
+        )
+        blocked_id = kanban_db.create_task(
+            conn,
+            title="Blocked dashboard decision",
+            body="Needs owner for 28500dd and session 20260702_231827_17187a.",
+            assignee="reviewer",
+            initial_status="blocked",
+            priority=5,
+            parents=[parent_id],
+        )
+        now = int(time.time())
+        conn.execute(
+            "UPDATE tasks SET last_failure_error = ?, block_kind = ? WHERE id = ?",
+            ("needs UX approval", "needs_input", blocked_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runs (task_id, status, started_at, ended_at, outcome, summary, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                blocked_id,
+                "blocked",
+                now,
+                now,
+                "blocked",
+                "Checked docs/wiki/code-note.md",
+                json.dumps({"verification": {"typecheck": "pass"}}),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    before_mtime = db_path.stat().st_mtime_ns
+    body = client.get("/api/knowledge/status", params={"path": str(vault)}).json()
+
+    assert db_path.stat().st_mtime_ns == before_mtime
+    assert body["workState"]["available"] is True
+    assert body["workState"]["counts"]["total"] == 2
+    assert body["workState"]["counts"]["blocked"] == 1
+    assert body["workState"]["tasks"][0]["id"] == blocked_id
+    assert body["workState"]["tasks"][0]["blockedReason"] == "needs UX approval"
+    assert body["workState"]["tasks"][0]["parents"] == [parent_id]
+    assert body["workState"]["tasks"][0]["links"]["commits"] == ["28500dd"]
+    assert body["workState"]["tasks"][0]["links"]["sessions"] == ["20260702_231827_17187a"]
+    assert body["workState"]["tasks"][1]["links"]["files"] == ["web/src/pages/KnowledgePage.tsx"]
 
 
 def test_knowledge_status_requires_auth(tmp_path):
