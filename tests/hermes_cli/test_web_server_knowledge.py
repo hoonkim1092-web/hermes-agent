@@ -1,0 +1,103 @@
+from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
+
+from hermes_cli import web_server
+
+pytest.importorskip("starlette.testclient")
+from starlette.testclient import TestClient
+
+
+@pytest.fixture
+def client():
+    previous = getattr(web_server.app.state, "auth_required", None)
+    web_server.app.state.auth_required = False
+    test_client = TestClient(web_server.app)
+    test_client.headers[web_server._SESSION_HEADER_NAME] = web_server._SESSION_TOKEN
+    try:
+        yield test_client
+    finally:
+        if previous is None:
+            try:
+                delattr(web_server.app.state, "auth_required")
+            except AttributeError:
+                pass
+        else:
+            web_server.app.state.auth_required = previous
+
+
+def test_knowledge_status_reports_read_only_vault_health(client, tmp_path):
+    vault = tmp_path / "docs" / "wiki"
+    if shutil.which("git"):
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
+        (tmp_path / "run_agent.py").write_text("print('hello')\n", encoding="utf-8")
+        subprocess.run(["git", "add", "run_agent.py"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+    (vault / "inbox" / "sources").mkdir(parents=True)
+    (vault / "raw" / "sessions").mkdir(parents=True)
+    (vault / "knowledge" / "concepts").mkdir(parents=True)
+    (vault / "SCHEMA.md").write_text("# Schema\n", encoding="utf-8")
+    (vault / "index.md").write_text("[[knowledge/concepts/agent-runtime]]\n", encoding="utf-8")
+    (vault / "log.md").write_text("# Log\n", encoding="utf-8")
+    (vault / "inbox" / "sources" / "todo.md").write_text("inbox", encoding="utf-8")
+    (vault / "raw" / "sessions" / "s1.md").write_text("raw", encoding="utf-8")
+    (vault / "knowledge" / "concepts" / "agent-runtime.md").write_text(
+        "---\n"
+        "sources:\n"
+        "  - raw/sessions/s1.md\n"
+        "code_refs:\n"
+        "  - run_agent.py:1\n"
+        "created_commit: abc123\n"
+        "---\n"
+        "# Agent Runtime\n"
+        "See [[missing-note]].\n",
+        encoding="utf-8",
+    )
+
+    body = client.get("/api/knowledge/status", params={"path": str(vault)}).json()
+
+    assert body["vaultPath"] == str(vault.resolve())
+    assert body["exists"] is True
+    assert body["health"] == {"schema": True, "index": True, "log": True}
+    assert body["counts"]["markdownFiles"] == 6
+    assert body["counts"]["inboxItems"] == 1
+    assert body["counts"]["rawFiles"] == 1
+    assert body["counts"]["notesWithSources"] == 1
+    assert body["counts"]["notesWithCodeRefs"] == 1
+    assert body["counts"]["notesWithCommitRefs"] == 1
+    assert body["counts"]["brokenLinks"] == 1
+    assert body["sampleBrokenLinks"] == ["missing-note"]
+    assert body["gitNexus"]["codeRefCount"] == 1
+    assert body["gitNexus"]["commitRefCount"] == 1
+    assert body["gitNexus"]["fileToNotes"] == [
+        {"file": "run_agent.py", "notes": ["knowledge/concepts/agent-runtime.md"]}
+    ]
+    if shutil.which("git"):
+        assert body["gitNexus"]["isGitRepo"] is True
+        assert body["gitNexus"]["gitRoot"] == str(tmp_path.resolve())
+        assert body["gitNexus"]["recentCommits"][0]["subject"] == "initial"
+
+
+def test_knowledge_status_defaults_to_project_docs_wiki(client, tmp_path, monkeypatch):
+    vault = tmp_path / "repo" / "docs" / "wiki"
+    vault.mkdir(parents=True)
+    (vault / "SCHEMA.md").write_text("# Schema\n", encoding="utf-8")
+    (vault / "index.md").write_text("# Index\n", encoding="utf-8")
+    (vault / "log.md").write_text("# Log\n", encoding="utf-8")
+    monkeypatch.setattr(web_server, "load_config", lambda: {"terminal": {"cwd": str(tmp_path / "repo")}})
+
+    body = client.get("/api/knowledge/status").json()
+
+    assert body["requestedPath"] is None
+    assert Path(body["vaultPath"]) == vault.resolve()
+    assert body["exists"] is True
+
+
+def test_knowledge_status_requires_auth(tmp_path):
+    unauth = TestClient(web_server.app)
+
+    assert unauth.get("/api/knowledge/status", params={"path": str(tmp_path)}).status_code == 401

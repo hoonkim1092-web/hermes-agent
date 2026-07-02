@@ -79,6 +79,7 @@ import FilesPage from "@/pages/FilesPage";
 import SessionsPage from "@/pages/SessionsPage";
 import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
+import KnowledgePage from "@/pages/KnowledgePage";
 import ModelsPage from "@/pages/ModelsPage";
 import CronPage from "@/pages/CronPage";
 import ProfilesPage from "@/pages/ProfilesPage";
@@ -134,6 +135,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
   "/sessions": SessionsPage,
   "/files": FilesPage,
+  "/knowledge": KnowledgePage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
   "/logs": LogsPage,
@@ -168,6 +170,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
     icon: MessageSquare,
   },
   { path: "/files", label: "Files", icon: FolderOpen },
+  { path: "/knowledge", label: "Knowledge", icon: Database },
   {
     path: "/analytics",
     labelKey: "analytics",
