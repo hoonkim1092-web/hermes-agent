@@ -1979,6 +1979,288 @@ async def fs_default_cwd():
 
 
 # ---------------------------------------------------------------------------
+# Knowledge Hub — read-only vault status for the dashboard.
+#
+# This intentionally stays filesystem-backed and side-effect free.  The
+# dashboard can point it at a project-local ``docs/wiki`` folder or any plain
+# markdown vault; write/proposal flows should be layered on top later via
+# skills + file patches, not a new core orchestration runtime.
+# ---------------------------------------------------------------------------
+
+_KNOWLEDGE_MAX_MARKDOWN_FILES = 2000
+_KNOWLEDGE_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
+_KNOWLEDGE_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def _knowledge_default_vault_path() -> Path:
+    for key in ("WIKI_PATH", "OBSIDIAN_VAULT_PATH"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return Path(value).expanduser().resolve()
+    return Path(_fs_default_cwd()).resolve() / "docs" / "wiki"
+
+
+def _knowledge_markdown_files(root: Path) -> list[Path]:
+    files: list[Path] = []
+    if not root.is_dir():
+        return files
+    for path in root.rglob("*.md"):
+        if len(files) >= _KNOWLEDGE_MAX_MARKDOWN_FILES:
+            break
+        if any(part in {".git", "node_modules", ".obsidian", ".trash"} for part in path.parts):
+            continue
+        if path.is_file():
+            files.append(path)
+    return files
+
+
+def _knowledge_count_files(path: Path) -> int:
+    if not path.is_dir():
+        return 0
+    count = 0
+    for child in path.rglob("*"):
+        if child.is_file():
+            count += 1
+    return count
+
+
+def _knowledge_frontmatter(text: str) -> dict[str, Any]:
+    match = _KNOWLEDGE_FRONTMATTER_RE.match(text)
+    if not match:
+        return {}
+    try:
+        parsed = yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(key): value for key, value in parsed.items()}
+
+
+def _knowledge_frontmatter_keys(text: str) -> set[str]:
+    return set(_knowledge_frontmatter(text).keys())
+
+
+def _knowledge_as_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [line.strip() for line in value.splitlines() if line.strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def _knowledge_git_root(start: Path) -> Path | None:
+    cursor = start if start.is_dir() else start.parent
+    for candidate in (cursor, *cursor.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _knowledge_git(args: list[str], cwd: Path) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout
+
+
+def _knowledge_git_status(git_root: Path) -> list[dict[str, str]]:
+    output = _knowledge_git(["status", "--porcelain=v1", "-z"], git_root)
+    files: list[dict[str, str]] = []
+    entries = [entry for entry in output.split("\0") if entry]
+    i = 0
+    while i < len(entries) and len(files) < 50:
+        entry = entries[i]
+        code = entry[:2]
+        path = entry[3:]
+        # Rename/copy records carry the destination path in the next NUL field.
+        if code.strip() and (code[0] in {"R", "C"} or code[1] in {"R", "C"}) and i + 1 < len(entries):
+            i += 1
+            path = entries[i]
+        if path:
+            files.append({"status": code, "path": path.replace("\\", "/")})
+        i += 1
+    return files
+
+
+def _knowledge_git_commits(git_root: Path) -> list[dict[str, str]]:
+    output = _knowledge_git(["log", "-n", "8", "--date=short", "--format=%H%x1f%h%x1f%ad%x1f%s"], git_root)
+    commits: list[dict[str, str]] = []
+    for line in output.splitlines():
+        parts = line.split("\x1f", 3)
+        if len(parts) == 4:
+            commits.append({"hash": parts[0], "shortHash": parts[1], "date": parts[2], "subject": parts[3]})
+    return commits
+
+
+def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
+    git_root = _knowledge_git_root(root)
+    code_ref_count = 0
+    commit_ref_count = 0
+    file_to_notes: dict[str, set[str]] = {}
+    commit_to_notes: dict[str, set[str]] = {}
+
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        frontmatter = _knowledge_frontmatter(text)
+        note = path.relative_to(root).as_posix()
+        for ref in _knowledge_as_list(frontmatter.get("code_refs")):
+            code_ref_count += 1
+            file_ref = ref.split(":", 1)[0].strip().replace("\\", "/")
+            if file_ref:
+                file_to_notes.setdefault(file_ref, set()).add(note)
+        for commit in _knowledge_as_list(frontmatter.get("created_commit")):
+            commit_ref_count += 1
+            if commit:
+                commit_to_notes.setdefault(commit, set()).add(note)
+
+    reverse_links = [
+        {"file": file_ref, "notes": sorted(notes)[:8]}
+        for file_ref, notes in sorted(file_to_notes.items())[:25]
+    ]
+    commit_links = [
+        {"commit": commit, "notes": sorted(notes)[:8]}
+        for commit, notes in sorted(commit_to_notes.items())[:25]
+    ]
+
+    return {
+        "gitRoot": str(git_root) if git_root else None,
+        "isGitRepo": git_root is not None,
+        "dirtyFiles": _knowledge_git_status(git_root) if git_root else [],
+        "recentCommits": _knowledge_git_commits(git_root) if git_root else [],
+        "codeRefCount": code_ref_count,
+        "commitRefCount": commit_ref_count,
+        "fileToNotes": reverse_links,
+        "commitToNotes": commit_links,
+    }
+
+
+def _knowledge_link_targets(files: list[Path], root: Path) -> set[str]:
+    targets: set[str] = set()
+    for path in files:
+        rel = path.relative_to(root).with_suffix("")
+        rel_posix = rel.as_posix()
+        targets.add(rel_posix.lower())
+        targets.add(path.stem.lower())
+    return targets
+
+
+def _knowledge_normalize_link(raw: str) -> str:
+    text = raw.strip().replace("\\", "/")
+    if text.endswith(".md"):
+        text = text[:-3]
+    return text.lower()
+
+
+def _knowledge_status_for(vault: Path, requested_path: str | None) -> Dict[str, Any]:
+    root = vault.expanduser().resolve()
+    schema = root / "SCHEMA.md"
+    index = root / "index.md"
+    log_file = root / "log.md"
+    inbox = root / "inbox"
+    raw = root / "raw"
+
+    files = _knowledge_markdown_files(root)
+    targets = _knowledge_link_targets(files, root)
+    broken_links: set[str] = set()
+    notes_with_sources = 0
+    notes_with_code_refs = 0
+    notes_with_commit_refs = 0
+    orphan_candidates = 0
+
+    inbound_counts: dict[str, int] = {path.relative_to(root).with_suffix("").as_posix().lower(): 0 for path in files}
+    inbound_counts.update({path.stem.lower(): 0 for path in files})
+
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        keys = _knowledge_frontmatter_keys(text)
+        if "sources" in keys:
+            notes_with_sources += 1
+        if "code_refs" in keys:
+            notes_with_code_refs += 1
+        if "created_commit" in keys:
+            notes_with_commit_refs += 1
+        for raw_link in _KNOWLEDGE_WIKILINK_RE.findall(text):
+            link = _knowledge_normalize_link(raw_link)
+            if link in targets:
+                inbound_counts[link] = inbound_counts.get(link, 0) + 1
+            else:
+                broken_links.add(raw_link.strip())
+
+    for path in files:
+        rel = path.relative_to(root).with_suffix("").as_posix().lower()
+        if path.name not in {"SCHEMA.md", "index.md", "log.md"} and inbound_counts.get(rel, 0) == 0 and inbound_counts.get(path.stem.lower(), 0) == 0:
+            orphan_candidates += 1
+
+    warnings: list[str] = []
+    if not root.exists():
+        warnings.append("Vault path does not exist yet.")
+    elif not root.is_dir():
+        warnings.append("Vault path is not a directory.")
+    for label, exists in (("SCHEMA.md", schema.is_file()), ("index.md", index.is_file()), ("log.md", log_file.is_file())):
+        if root.exists() and not exists:
+            warnings.append(f"Missing {label}.")
+    if len(files) >= _KNOWLEDGE_MAX_MARKDOWN_FILES:
+        warnings.append(f"Scan capped at {_KNOWLEDGE_MAX_MARKDOWN_FILES} markdown files.")
+    if broken_links:
+        warnings.append(f"{len(broken_links)} broken wikilink target(s) detected.")
+
+    return {
+        "requestedPath": requested_path,
+        "vaultPath": str(root),
+        "exists": root.is_dir(),
+        "health": {
+            "schema": schema.is_file(),
+            "index": index.is_file(),
+            "log": log_file.is_file(),
+        },
+        "counts": {
+            "markdownFiles": len(files),
+            "inboxItems": _knowledge_count_files(inbox),
+            "rawFiles": _knowledge_count_files(raw),
+            "notesWithSources": notes_with_sources,
+            "notesWithCodeRefs": notes_with_code_refs,
+            "notesWithCommitRefs": notes_with_commit_refs,
+            "brokenLinks": len(broken_links),
+            "orphanCandidates": orphan_candidates,
+        },
+        "warnings": warnings,
+        "sampleBrokenLinks": sorted(broken_links)[:10],
+        "gitNexus": _knowledge_git_nexus(root, files),
+        "scanLimit": _KNOWLEDGE_MAX_MARKDOWN_FILES,
+    }
+
+
+@app.get("/api/knowledge/status")
+async def knowledge_status(path: Optional[str] = None, profile: Optional[str] = None):
+    raw_path = (path or "").strip()
+    with _config_profile_scope(profile):
+        vault = _fs_path(raw_path) if raw_path else _knowledge_default_vault_path()
+        return _knowledge_status_for(vault, raw_path or None)
+
+
+# ---------------------------------------------------------------------------
 # Git ops — the remote half of the desktop coding rail + review pane.
 #
 # The desktop runs these as Electron-local git on the user's machine; over a

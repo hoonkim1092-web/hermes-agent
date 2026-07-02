@@ -80,6 +80,7 @@ const PROFILE_SCOPED_PREFIXES = [
   "/api/model/auxiliary",
   "/api/model/moa",
   "/api/model/options",
+  "/api/knowledge",
 ];
 
 function withManagementProfile(url: string): string {
@@ -455,6 +456,10 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, recursive }),
     }),
+  getKnowledgeStatus: (path?: string) => {
+    const query = path?.trim() ? `?path=${encodeURIComponent(path.trim())}` : "";
+    return fetchJSON<KnowledgeStatusResponse>(`/api/knowledge/status${query}`);
+  },
   getLogs: (params: { file?: string; lines?: number; level?: string; component?: string }) => {
     const qs = new URLSearchParams();
     if (params.file) qs.set("file", params.file);
@@ -1790,6 +1795,64 @@ export interface ManagedFileWriteResponse {
   root: string | null;
   locked_root: string | null;
   can_change_path: boolean;
+}
+
+export interface KnowledgeGitDirtyFile {
+  status: string;
+  path: string;
+}
+
+export interface KnowledgeGitCommit {
+  hash: string;
+  shortHash: string;
+  date: string;
+  subject: string;
+}
+
+export interface KnowledgeGitFileLink {
+  file: string;
+  notes: string[];
+}
+
+export interface KnowledgeGitCommitLink {
+  commit: string;
+  notes: string[];
+}
+
+export interface KnowledgeGitNexus {
+  gitRoot: string | null;
+  isGitRepo: boolean;
+  dirtyFiles: KnowledgeGitDirtyFile[];
+  recentCommits: KnowledgeGitCommit[];
+  codeRefCount: number;
+  commitRefCount: number;
+  fileToNotes: KnowledgeGitFileLink[];
+  commitToNotes: KnowledgeGitCommitLink[];
+}
+
+export interface KnowledgeStatusResponse {
+  requestedPath: string | null;
+  vaultPath: string;
+  exists: boolean;
+  health: {
+    schema: boolean;
+    index: boolean;
+    log: boolean;
+  };
+  counts: {
+    markdownFiles: number;
+    inboxItems: number;
+    rawFiles: number;
+    notesWithSources: number;
+    notesWithCodeRefs: number;
+    notesWithCommitRefs: number;
+    brokenLinks: number;
+    orphanCandidates: number;
+  };
+  warnings: string[];
+  sampleBrokenLinks: string[];
+  gitNexus: KnowledgeGitNexus;
+  scanLimit: number;
 }
 
 export interface AnalyticsDailyEntry {
