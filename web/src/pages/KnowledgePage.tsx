@@ -355,8 +355,8 @@ export default function KnowledgePage() {
           </div>
           <ol className="grid gap-2 text-sm leading-6 text-muted-foreground md:grid-cols-2">
             <li>1. Keep Work State and Git Nexus as read-only status surfaces backed by Kanban, git, and GitHub.</li>
-            <li>2. Next small slice: surface merged delivery provenance for the main branch from recent commits or merged PRs.</li>
-            <li>3. Use Kanban task results and run verification as the durable work-state trail.</li>
+            <li>2. Merged delivery is now linked to Kanban run summaries and verification evidence.</li>
+            <li>3. Next small slice: add read-only review/check provenance around merged PRs.</li>
             <li>4. Keep proposal/diff writes for a later slice after the read-only delivery path is clear.</li>
           </ol>
         </CardContent>
