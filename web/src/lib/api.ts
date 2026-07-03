@@ -1849,10 +1849,24 @@ export interface KnowledgeWorkStateTask {
   verification: unknown;
   links: {
     files: string[];
+    branches: string[];
+    prs: string[];
     commits: string[];
     sessions: string[];
     notes: string[];
   };
+}
+
+export interface KnowledgeCurrentFocusItem {
+  id: string;
+  content: string;
+  status: string;
+}
+
+export interface KnowledgeCurrentFocus {
+  available: boolean;
+  items: KnowledgeCurrentFocusItem[];
+  warning: string | null;
 }
 
 export interface KnowledgeWorkState {
@@ -1868,6 +1882,7 @@ export interface KnowledgeWorkState {
     review: number;
   };
   warning: string | null;
+  currentFocus: KnowledgeCurrentFocus;
 }
 
 export interface KnowledgeStatusResponse {

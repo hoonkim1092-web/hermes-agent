@@ -2182,27 +2182,48 @@ def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
 
 
 _KNOWLEDGE_WORK_LINK_RE = re.compile(
-    r"(?P<file>(?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]+)"
+    r"(?P<pr>https?://github\.com/[\w.-]+/[\w.-]+/pull/\d+)"
+    r"|(?P<file>(?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]+)"
+    r"|(?P<branch>\b(?:feat|fix|chore|docs|refactor|test|hotfix|release)/[\w./-]+\b)"
     r"|(?P<commit>\b[0-9a-f]{7,40}\b)"
     r"|(?P<session>\b\d{8}_\d{6}_[0-9a-f]{6}\b)"
-    r"|(?P<note>\[\[([^\]]+)\]\])"
+    r"|(?P<note>\[\[(?P<note_target>[^\]]+)\]\])"
 )
 
 
+def _knowledge_empty_current_focus() -> dict[str, Any]:
+    return {
+        "available": False,
+        "items": [],
+        "warning": "Current-session Todo is not persisted as durable project work state.",
+    }
+
+
 def _knowledge_work_links(*texts: str | None) -> dict[str, list[str]]:
-    links: dict[str, set[str]] = {"files": set(), "commits": set(), "sessions": set(), "notes": set()}
+    links: dict[str, set[str]] = {
+        "files": set(),
+        "branches": set(),
+        "prs": set(),
+        "commits": set(),
+        "sessions": set(),
+        "notes": set(),
+    }
     for text in texts:
         if not text:
             continue
         for match in _KNOWLEDGE_WORK_LINK_RE.finditer(text):
-            if match.group("file"):
+            if match.group("pr"):
+                links["prs"].add(match.group("pr"))
+            elif match.group("file"):
                 links["files"].add(match.group("file").replace("\\", "/"))
+            elif match.group("branch"):
+                links["branches"].add(match.group("branch"))
             elif match.group("commit"):
                 links["commits"].add(match.group("commit"))
             elif match.group("session"):
                 links["sessions"].add(match.group("session"))
             elif match.group("note"):
-                note = match.group(5) or ""
+                note = match.group("note_target") or ""
                 if note.strip():
                     links["notes"].add(note.strip())
     return {key: sorted(values)[:6] for key, values in links.items()}
@@ -2216,6 +2237,7 @@ def _knowledge_empty_work_state(board: str | None, db_path: Path | None, warning
         "tasks": [],
         "counts": {"total": 0, "blocked": 0, "running": 0, "ready": 0, "review": 0},
         "warning": warning,
+        "currentFocus": _knowledge_empty_current_focus(),
     }
 
 
@@ -2315,6 +2337,7 @@ def _knowledge_work_state() -> dict[str, Any]:
         "tasks": tasks,
         "counts": counts,
         "warning": None,
+        "currentFocus": _knowledge_empty_current_focus(),
     }
 
 

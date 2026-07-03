@@ -98,6 +98,7 @@ def test_knowledge_status_reports_read_only_vault_health(client, tmp_path, monke
         assert body["gitNexus"]["recentCommits"][0]["subject"] == "initial"
     assert body["workState"]["available"] is False
     assert body["workState"]["counts"]["total"] == 0
+    assert not (tmp_path / "missing-kanban.db").exists()
 
 
 def test_knowledge_status_defaults_to_project_docs_wiki(client, tmp_path, monkeypatch):
@@ -137,7 +138,10 @@ def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path,
         blocked_id = kanban_db.create_task(
             conn,
             title="Blocked dashboard decision",
-            body="Needs owner for 28500dd and session 20260702_231827_17187a.",
+            body=(
+                "Needs owner for 28500dd, PR https://github.com/hoonkim1092-web/hermes-agent/pull/42, "
+                "branch feat/knowledge-work-state-panel, and session 20260702_231827_17187a."
+            ),
             assignee="reviewer",
             initial_status="blocked",
             priority=5,
@@ -177,9 +181,16 @@ def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path,
     assert body["workState"]["tasks"][0]["id"] == blocked_id
     assert body["workState"]["tasks"][0]["blockedReason"] == "needs UX approval"
     assert body["workState"]["tasks"][0]["parents"] == [parent_id]
+    assert body["workState"]["tasks"][0]["links"]["branches"] == ["feat/knowledge-work-state-panel"]
     assert body["workState"]["tasks"][0]["links"]["commits"] == ["28500dd"]
+    assert body["workState"]["tasks"][0]["links"]["prs"] == ["https://github.com/hoonkim1092-web/hermes-agent/pull/42"]
     assert body["workState"]["tasks"][0]["links"]["sessions"] == ["20260702_231827_17187a"]
     assert body["workState"]["tasks"][1]["links"]["files"] == ["web/src/pages/KnowledgePage.tsx"]
+    assert body["workState"]["currentFocus"] == {
+        "available": False,
+        "items": [],
+        "warning": "Current-session Todo is not persisted as durable project work state.",
+    }
 
 
 def test_knowledge_status_requires_auth(tmp_path):
