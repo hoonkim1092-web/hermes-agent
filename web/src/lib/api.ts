@@ -1838,12 +1838,23 @@ export interface KnowledgeGitHubCheck {
   url: string | null;
 }
 
+export interface KnowledgeGitHubMergedPullRequest {
+  number: number | null;
+  url: string | null;
+  title: string | null;
+  headRefName: string | null;
+  baseRefName: string | null;
+  mergedAt: string | null;
+  mergeCommit: string | null;
+}
+
 export interface KnowledgeGitHubStatus {
   available: boolean;
   repo: string | null;
   branch: string | null;
   pullRequest: KnowledgeGitHubPullRequest | null;
   checks: KnowledgeGitHubCheck[];
+  mergedPullRequests: KnowledgeGitHubMergedPullRequest[];
   warning: string | null;
 }
 

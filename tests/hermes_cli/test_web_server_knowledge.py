@@ -241,6 +241,28 @@ def test_knowledge_status_includes_read_only_github_pr_status(client, tmp_path, 
                 ),
                 stderr="",
             )
+        if args[:3] == ["gh", "pr", "list"]:
+            assert args[4] == "hoonkim1092-web/hermes-agent"
+            assert "--state" in args and args[args.index("--state") + 1] == "merged"
+            assert "--base" in args and args[args.index("--base") + 1] == "main"
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 6,
+                            "url": "https://github.com/hoonkim1092-web/hermes-agent/pull/6",
+                            "title": "Refresh roadmap",
+                            "headRefName": "feat/roadmap",
+                            "baseRefName": "main",
+                            "mergedAt": "2026-07-03T03:42:27Z",
+                            "mergeCommit": {"oid": "eeb389bf26b9d75eb735d918f93e0ac753577e33"},
+                        }
+                    ]
+                ),
+                stderr="",
+            )
         return original_run(args, *run_args, **run_kwargs)
 
     monkeypatch.setattr(web_server.shutil, "which", lambda name: "gh" if name == "gh" else shutil.which(name))
@@ -257,6 +279,17 @@ def test_knowledge_status_includes_read_only_github_pr_status(client, tmp_path, 
     assert github["checks"] == [
         {"name": "typecheck", "status": "COMPLETED", "conclusion": "SUCCESS", "url": "https://checks.example/typecheck"},
         {"name": "tests", "status": "IN_PROGRESS", "conclusion": None, "url": None},
+    ]
+    assert github["mergedPullRequests"] == [
+        {
+            "number": 6,
+            "url": "https://github.com/hoonkim1092-web/hermes-agent/pull/6",
+            "title": "Refresh roadmap",
+            "headRefName": "feat/roadmap",
+            "baseRefName": "main",
+            "mergedAt": "2026-07-03T03:42:27Z",
+            "mergeCommit": "eeb389bf26b9d75eb735d918f93e0ac753577e33",
+        }
     ]
     assert not (tmp_path / "missing-kanban.db").exists()
 

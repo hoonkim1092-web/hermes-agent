@@ -2158,6 +2158,7 @@ def _knowledge_empty_github_status(repo: str | None, branch: str | None, warning
         "branch": branch,
         "pullRequest": None,
         "checks": [],
+        "mergedPullRequests": [],
         "warning": warning,
     }
 
@@ -2180,8 +2181,30 @@ def _knowledge_normalize_check_rollup(items: Any) -> list[dict[str, str | None]]
     return checks
 
 
+def _knowledge_normalize_merged_prs(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    prs: list[dict[str, Any]] = []
+    for item in items[:6]:
+        if not isinstance(item, dict):
+            continue
+        merge_commit = item.get("mergeCommit") if isinstance(item.get("mergeCommit"), dict) else {}
+        prs.append(
+            {
+                "number": item.get("number"),
+                "url": item.get("url"),
+                "title": item.get("title"),
+                "headRefName": item.get("headRefName"),
+                "baseRefName": item.get("baseRefName"),
+                "mergedAt": item.get("mergedAt"),
+                "mergeCommit": merge_commit.get("oid"),
+            }
+        )
+    return prs
+
+
 def _knowledge_github_status(git_root: Path | None) -> dict[str, Any]:
-    """Return a narrow read-only GitHub PR/check summary for the current branch."""
+    """Return narrow read-only GitHub delivery status for the current repo."""
     if git_root is None:
         return _knowledge_empty_github_status(None, None, "No git repository found.")
 
@@ -2194,22 +2217,77 @@ def _knowledge_github_status(git_root: Path | None) -> dict[str, Any]:
         repo = _knowledge_github_owner_repo(_knowledge_git(["remote", "get-url", "origin"], git_root))
     if repo is None:
         return _knowledge_empty_github_status(None, branch, "No GitHub remote found for the current repository.")
-    if not branch:
-        return _knowledge_empty_github_status(repo, None, "Detached HEAD; no branch PR status to query.")
     if shutil.which("gh") is None:
         return _knowledge_empty_github_status(repo, branch, "GitHub CLI `gh` is not installed.")
 
+    pr = None
+    checks: list[dict[str, str | None]] = []
+    warning = None
+    if branch:
+        try:
+            completed = subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "view",
+                    branch,
+                    "--repo",
+                    repo,
+                    "--json",
+                    "number,url,state,title,headRefName,baseRefName,isDraft,mergeable,reviewDecision,statusCheckRollup",
+                ],
+                cwd=str(git_root),
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            completed = None
+            warning = f"GitHub PR status unavailable: {exc}"
+        if completed is not None and completed.returncode == 0:
+            try:
+                data = json.loads(completed.stdout)
+            except json.JSONDecodeError as exc:
+                warning = f"GitHub PR status returned invalid JSON: {exc}"
+            else:
+                pr = {
+                    "number": data.get("number"),
+                    "url": data.get("url"),
+                    "state": data.get("state"),
+                    "title": data.get("title"),
+                    "headRefName": data.get("headRefName"),
+                    "baseRefName": data.get("baseRefName"),
+                    "isDraft": bool(data.get("isDraft")),
+                    "mergeable": data.get("mergeable"),
+                    "reviewDecision": data.get("reviewDecision"),
+                }
+                checks = _knowledge_normalize_check_rollup(data.get("statusCheckRollup"))
+        elif completed is not None:
+            message = (completed.stderr or completed.stdout or "No pull request found for the current branch.").strip()
+            warning = message.splitlines()[-1] if message else "No pull request found for the current branch."
+    else:
+        warning = "Detached HEAD; no branch PR status to query."
+
     try:
-        completed = subprocess.run(
+        merged_completed = subprocess.run(
             [
                 "gh",
                 "pr",
-                "view",
-                branch,
+                "list",
                 "--repo",
                 repo,
+                "--state",
+                "merged",
+                "--base",
+                "main",
+                "--limit",
+                "6",
                 "--json",
-                "number,url,state,title,headRefName,baseRefName,isDraft,mergeable,reviewDecision,statusCheckRollup",
+                "number,url,title,headRefName,baseRefName,mergedAt,mergeCommit",
             ],
             cwd=str(git_root),
             text=True,
@@ -2220,33 +2298,25 @@ def _knowledge_github_status(git_root: Path | None) -> dict[str, Any]:
             timeout=10,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return _knowledge_empty_github_status(repo, branch, f"GitHub PR status unavailable: {exc}")
-    if completed.returncode != 0:
-        warning = (completed.stderr or completed.stdout or "GitHub PR status unavailable.").strip().splitlines()[-1]
-        return _knowledge_empty_github_status(repo, branch, warning)
-    try:
-        data = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        return _knowledge_empty_github_status(repo, branch, f"GitHub PR status returned invalid JSON: {exc}")
-    pr = {
-        "number": data.get("number"),
-        "url": data.get("url"),
-        "state": data.get("state"),
-        "title": data.get("title"),
-        "headRefName": data.get("headRefName"),
-        "baseRefName": data.get("baseRefName"),
-        "isDraft": bool(data.get("isDraft")),
-        "mergeable": data.get("mergeable"),
-        "reviewDecision": data.get("reviewDecision"),
-    }
+    except (OSError, subprocess.TimeoutExpired):
+        merged_prs: list[dict[str, Any]] = []
+    else:
+        if merged_completed.returncode == 0:
+            try:
+                merged_prs = _knowledge_normalize_merged_prs(json.loads(merged_completed.stdout))
+            except json.JSONDecodeError:
+                merged_prs = []
+        else:
+            merged_prs = []
+
     return {
-        "available": True,
+        "available": pr is not None or bool(merged_prs),
         "repo": repo,
         "branch": branch,
         "pullRequest": pr,
-        "checks": _knowledge_normalize_check_rollup(data.get("statusCheckRollup")),
-        "warning": None,
+        "checks": checks,
+        "mergedPullRequests": merged_prs,
+        "warning": warning,
     }
 
 
