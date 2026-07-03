@@ -119,6 +119,15 @@ const PHASES: PhaseCard[] = [
       "Connect merged PRs to Kanban run evidence",
     ],
   },
+  {
+    title: "MVP 6 — Proposal/diff preview",
+    status: "Design next",
+    items: [
+      "Preview intended files, commands, and git refs before writes",
+      "Require explicit apply for branches, commits, PRs, and note rewrites",
+      "Record accepted changes back to Kanban run evidence",
+    ],
+  },
 ];
 
 const GUARDRAILS: GuardrailCard[] = [
@@ -131,6 +140,11 @@ const GUARDRAILS: GuardrailCard[] = [
     title: "Diff first for risky edits",
     description:
       "Existing notes, NEXT_STEPS exports, archive/delete actions, and confidence upgrades require review before apply.",
+  },
+  {
+    title: "Preview before write",
+    description:
+      "Branch creation, commits, PRs, note rewrites, and archive/delete actions should show planned files, commands, and refs before an explicit apply.",
   },
   {
     title: "Git Nexus is an index",
@@ -354,10 +368,10 @@ export default function KnowledgePage() {
             </h3>
           </div>
           <ol className="grid gap-2 text-sm leading-6 text-muted-foreground md:grid-cols-2">
-            <li>1. Keep Work State and Git Nexus as read-only status surfaces backed by Kanban, git, and GitHub.</li>
-            <li>2. Merged delivery now includes Kanban run evidence plus merged review/check provenance.</li>
-            <li>3. Next small slice: design a read-first proposal/diff preview path before enabling writes.</li>
-            <li>4. Keep branch creation, commits, and PR writes behind explicit user action until that path is reviewed.</li>
+            <li>1. Treat proposal/diff preview as a read-first planning surface, not a write engine.</li>
+            <li>2. Preview file targets, commands, git refs, risks, and expected Kanban evidence before apply.</li>
+            <li>3. Require explicit user action before creating branches, commits, PRs, note rewrites, or archive/delete changes.</li>
+            <li>4. After an accepted apply, write the outcome back to Kanban run evidence so Work State and Git Nexus stay connected.</li>
           </ol>
         </CardContent>
       </Card>
