@@ -2198,6 +2198,7 @@ def _knowledge_normalize_merged_prs(items: Any) -> list[dict[str, Any]]:
                 "baseRefName": item.get("baseRefName"),
                 "mergedAt": item.get("mergedAt"),
                 "mergeCommit": merge_commit.get("oid"),
+                "kanbanEvidence": [],
             }
         )
     return prs
@@ -2394,6 +2395,46 @@ def _knowledge_empty_current_focus() -> dict[str, Any]:
         "items": [],
         "warning": "Current-session Todo is not persisted as durable project work state.",
     }
+
+
+def _knowledge_delivery_token_matches(task: dict[str, Any], merged_pr: dict[str, Any]) -> bool:
+    links = task.get("links") if isinstance(task.get("links"), dict) else {}
+    pr_url = str(merged_pr.get("url") or "")
+    head_ref = str(merged_pr.get("headRefName") or "")
+    merge_commit = str(merged_pr.get("mergeCommit") or "")
+    commit_tokens = {merge_commit, merge_commit[:12], merge_commit[:7]} if merge_commit else set()
+
+    if pr_url and pr_url in set(links.get("prs") or []):
+        return True
+    if head_ref and (head_ref == task.get("branchName") or head_ref in set(links.get("branches") or [])):
+        return True
+    task_commits = set(links.get("commits") or [])
+    if commit_tokens and any(token in task_commits for token in commit_tokens if token):
+        return True
+    return False
+
+
+def _knowledge_attach_kanban_delivery_evidence(github: dict[str, Any], work_state: dict[str, Any]) -> None:
+    """Attach read-only Kanban run evidence to matching merged PRs in-place."""
+    tasks = work_state.get("tasks") if isinstance(work_state.get("tasks"), list) else []
+    merged_prs = github.get("mergedPullRequests") if isinstance(github.get("mergedPullRequests"), list) else []
+    for merged_pr in merged_prs:
+        if not isinstance(merged_pr, dict):
+            continue
+        evidence: list[dict[str, Any]] = []
+        for task in tasks:
+            if not isinstance(task, dict) or not _knowledge_delivery_token_matches(task, merged_pr):
+                continue
+            evidence.append(
+                {
+                    "taskId": task.get("id"),
+                    "title": task.get("title"),
+                    "status": task.get("status"),
+                    "latestRunSummary": task.get("latestRunSummary"),
+                    "verification": task.get("verification"),
+                }
+            )
+        merged_pr["kanbanEvidence"] = evidence[:4]
 
 
 def _knowledge_work_links(*texts: str | None) -> dict[str, list[str]]:
@@ -2611,6 +2652,12 @@ def _knowledge_status_for(vault: Path, requested_path: str | None) -> Dict[str, 
     if broken_links:
         warnings.append(f"{len(broken_links)} broken wikilink target(s) detected.")
 
+    git_nexus = _knowledge_git_nexus(root, files)
+    work_state = _knowledge_work_state()
+    github = git_nexus.get("github") if isinstance(git_nexus.get("github"), dict) else None
+    if github is not None:
+        _knowledge_attach_kanban_delivery_evidence(github, work_state)
+
     return {
         "requestedPath": requested_path,
         "vaultPath": str(root),
@@ -2632,8 +2679,8 @@ def _knowledge_status_for(vault: Path, requested_path: str | None) -> Dict[str, 
         },
         "warnings": warnings,
         "sampleBrokenLinks": sorted(broken_links)[:10],
-        "gitNexus": _knowledge_git_nexus(root, files),
-        "workState": _knowledge_work_state(),
+        "gitNexus": git_nexus,
+        "workState": work_state,
         "scanLimit": _KNOWLEDGE_MAX_MARKDOWN_FILES,
     }
 

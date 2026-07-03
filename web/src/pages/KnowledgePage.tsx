@@ -116,6 +116,7 @@ const PHASES: PhaseCard[] = [
       "Read current branch PR metadata through gh",
       "Show PR mergeability and review decision",
       "Show PR check names and conclusions",
+      "Connect merged PRs to Kanban run evidence",
     ],
   },
 ];
@@ -459,6 +460,20 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
     const commit = mergedPr.mergeCommit ? ` · ${mergedPr.mergeCommit.slice(0, 7)}` : "";
     return `#${mergedPr.number ?? "?"} ${mergedAt}${commit} ${mergedPr.title ?? "Untitled PR"}`;
   });
+  const mergedEvidenceLines = github.mergedPullRequests.flatMap((mergedPr) => {
+    const prLabel = `#${mergedPr.number ?? "?"}`;
+    return mergedPr.kanbanEvidence.flatMap((evidence) => {
+      const rows = [`${prLabel} ↔ ${evidence.taskId ?? "task"} [${evidence.status ?? "unknown"}] ${evidence.title ?? "Untitled task"}`];
+      if (evidence.latestRunSummary) {
+        rows.push(`${prLabel} ${evidence.taskId ?? "task"} run: ${evidence.latestRunSummary}`);
+      }
+      const verification = formatVerificationEvidence(evidence.verification);
+      if (verification) {
+        rows.push(`${prLabel} ${evidence.taskId ?? "task"} verification: ${verification}`);
+      }
+      return rows;
+    });
+  });
 
   return (
     <Card>
@@ -522,6 +537,12 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
             title="Merged delivery"
             empty="No recently merged pull requests found for main."
             items={mergedPrLines}
+          />
+          <NexusList
+            icon={ShieldCheck}
+            title="Merged delivery + run evidence"
+            empty="No merged PRs are linked to completed Kanban run evidence yet."
+            items={dedupe(mergedEvidenceLines)}
           />
           <NexusList
             icon={Network}

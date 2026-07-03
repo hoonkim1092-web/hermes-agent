@@ -1838,6 +1838,14 @@ export interface KnowledgeGitHubCheck {
   url: string | null;
 }
 
+export interface KnowledgeGitHubKanbanEvidence {
+  taskId: string | null;
+  title: string | null;
+  status: string | null;
+  latestRunSummary: string | null;
+  verification: unknown;
+}
+
 export interface KnowledgeGitHubMergedPullRequest {
   number: number | null;
   url: string | null;
@@ -1846,6 +1854,7 @@ export interface KnowledgeGitHubMergedPullRequest {
   baseRefName: string | null;
   mergedAt: string | null;
   mergeCommit: string | null;
+  kanbanEvidence: KnowledgeGitHubKanbanEvidence[];
 }
 
 export interface KnowledgeGitHubStatus {
