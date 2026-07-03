@@ -289,9 +289,113 @@ def test_knowledge_status_includes_read_only_github_pr_status(client, tmp_path, 
             "baseRefName": "main",
             "mergedAt": "2026-07-03T03:42:27Z",
             "mergeCommit": "eeb389bf26b9d75eb735d918f93e0ac753577e33",
+            "kanbanEvidence": [],
         }
     ]
     assert not (tmp_path / "missing-kanban.db").exists()
+
+
+def test_knowledge_status_links_merged_delivery_to_kanban_run_evidence(client, tmp_path, monkeypatch):
+    vault = tmp_path / "docs" / "wiki"
+    vault.mkdir(parents=True)
+    (vault / "SCHEMA.md").write_text("# Schema\n", encoding="utf-8")
+    (vault / "index.md").write_text("# Index\n", encoding="utf-8")
+    (vault / "log.md").write_text("# Log\n", encoding="utf-8")
+    (tmp_path / "tracked.py").write_text("print('ok')\n", encoding="utf-8")
+    db_path = tmp_path / "kanban.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "remote", "add", "hoon", "https://github.com/hoonkim1092-web/hermes-agent.git"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "tracked.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+
+    conn = kanban_db.connect(db_path=db_path)
+    try:
+        task_id = kanban_db.create_task(
+            conn,
+            title="Ship merged delivery evidence",
+            body=(
+                "Delivered PR https://github.com/hoonkim1092-web/hermes-agent/pull/6 "
+                "from feat/roadmap."
+            ),
+            priority=7,
+        )
+        now = int(time.time())
+        conn.execute(
+            "UPDATE tasks SET status = ?, completed_at = ?, result = ? WHERE id = ?",
+            (
+                "done",
+                now,
+                "Squash merged eeb389bf26b9d75eb735d918f93e0ac753577e33.",
+                task_id,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runs (task_id, status, started_at, ended_at, outcome, summary, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                "done",
+                now,
+                now,
+                "completed",
+                "Verified PR #6 with npm run typecheck --workspace web",
+                json.dumps({"verification": {"typecheck": "pass", "build": "pass"}}),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    original_run = web_server.subprocess.run
+
+    def fake_run(args, *run_args, **run_kwargs):
+        if args[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="no pull requests found")
+        if args[:3] == ["gh", "pr", "list"]:
+            assert args[4] == "hoonkim1092-web/hermes-agent"
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 6,
+                            "url": "https://github.com/hoonkim1092-web/hermes-agent/pull/6",
+                            "title": "Refresh roadmap",
+                            "headRefName": "feat/roadmap",
+                            "baseRefName": "main",
+                            "mergedAt": "2026-07-03T03:42:27Z",
+                            "mergeCommit": {"oid": "eeb389bf26b9d75eb735d918f93e0ac753577e33"},
+                        }
+                    ]
+                ),
+                stderr="",
+            )
+        return original_run(args, *run_args, **run_kwargs)
+
+    monkeypatch.setattr(web_server.shutil, "which", lambda name: "gh" if name == "gh" else shutil.which(name))
+    monkeypatch.setattr(web_server.subprocess, "run", fake_run)
+
+    before_mtime = db_path.stat().st_mtime_ns
+    body = client.get("/api/knowledge/status", params={"path": str(vault)}).json()
+
+    assert db_path.stat().st_mtime_ns == before_mtime
+    merged_pr = body["gitNexus"]["github"]["mergedPullRequests"][0]
+    assert merged_pr["kanbanEvidence"] == [
+        {
+            "taskId": task_id,
+            "title": "Ship merged delivery evidence",
+            "status": "done",
+            "latestRunSummary": "Verified PR #6 with npm run typecheck --workspace web",
+            "verification": {"typecheck": "pass", "build": "pass"},
+        }
+    ]
 
 
 def test_knowledge_status_requires_auth(tmp_path):
