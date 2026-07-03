@@ -504,15 +504,39 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
 
 function WorkStateStatus({ status }: { status: KnowledgeStatusResponse }) {
   const work = status.workState;
+  const focusLines = work.currentFocus.items.map(
+    (item) => `${item.status} ${item.id}: ${item.content}`,
+  );
   const taskLines = work.tasks.map((task) => {
     const owner = task.assignee ? ` @${task.assignee}` : "";
-    const links = task.links.files.length + task.links.commits.length + task.links.sessions.length + task.links.notes.length;
+    const links =
+      task.links.files.length +
+      task.links.branches.length +
+      task.links.prs.length +
+      task.links.commits.length +
+      task.links.sessions.length +
+      task.links.notes.length;
     const suffix = links ? ` · ${links} link${links === 1 ? "" : "s"}` : "";
     return `${task.id} [${task.status}]${owner} ${task.title}${suffix}`;
   });
   const blockedLines = work.tasks
     .filter((task) => task.status === "blocked")
     .map((task) => `${task.id}: ${task.blockedReason || task.blockKind || "blocked"}`);
+  const relationLines = work.tasks.flatMap((task) => {
+    const rows = [
+      ...task.links.branches.map((branch) => `${task.id} branch ${branch}`),
+      ...task.links.prs.map((pr) => `${task.id} PR ${pr}`),
+      ...task.links.commits.map((commit) => `${task.id} commit ${commit}`),
+      ...(task.branchName ? [`${task.id} branch ${task.branchName}`] : []),
+    ];
+    return rows;
+  });
+  const sessionDocLines = work.tasks.flatMap((task) => [
+    ...(task.sessionId ? [`${task.id} session ${task.sessionId}`] : []),
+    ...task.links.sessions.map((sessionId) => `${task.id} session ${sessionId}`),
+    ...task.links.notes.map((note) => `${task.id} note ${note}`),
+    ...task.links.files.map((file) => `${task.id} file ${file}`),
+  ]);
 
   return (
     <Card>
@@ -561,10 +585,32 @@ function WorkStateStatus({ status }: { status: KnowledgeStatusResponse }) {
             empty="No blocked Kanban tasks in the current summary."
             items={blockedLines}
           />
+          <NexusList
+            icon={Clock}
+            title="Current focus"
+            empty={work.currentFocus.warning || "No active current-session Todo focus."}
+            items={focusLines}
+          />
+          <NexusList
+            icon={GitBranch}
+            title="Branches / PRs / commits"
+            empty="No branch, PR, or commit links found in the current summary."
+            items={dedupe(relationLines)}
+          />
+          <NexusList
+            icon={Network}
+            title="Sessions / docs / files"
+            empty="No session, note, or file links found in the current summary."
+            items={dedupe(sessionDocLines)}
+          />
         </div>
       </CardContent>
     </Card>
   );
+}
+
+function dedupe(items: string[]): string[] {
+  return Array.from(new Set(items)).slice(0, 8);
 }
 
 function NexusList({
