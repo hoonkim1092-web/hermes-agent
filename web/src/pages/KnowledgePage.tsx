@@ -46,7 +46,7 @@ const SUMMARY_CARDS: SummaryCard[] = [
   {
     title: "Knowledge Hub",
     description:
-      "Inbox-driven organizer for sources, work state, sessions, reviews, and handoff notes. It writes to an Obsidian-compatible LLM Wiki, not a new database.",
+      "Inbox-driven organizer for sources, work state, session promotion proposals, reviews, and handoff notes. It writes to an Obsidian-compatible LLM Wiki, not a new database.",
     icon: BookOpen,
   },
   {
@@ -120,7 +120,16 @@ const PHASES: PhaseCard[] = [
     ],
   },
   {
-    title: "MVP 6 — Proposal/diff preview",
+    title: "MVP 6 — Session promotion proposal",
+    status: "Applied now",
+    items: [
+      "Read selected or latest Session DB conversation",
+      "Propose durable wiki targets, decisions, sources, files, PRs, and risks",
+      "Keep wiki/NEXT_STEPS/file writes behind explicit apply",
+    ],
+  },
+  {
+    title: "MVP 7 — Proposal/diff preview",
     status: "Design next",
     items: [
       "Preview intended files, commands, and git refs before writes",
