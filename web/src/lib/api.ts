@@ -1854,6 +1854,8 @@ export interface KnowledgeGitHubMergedPullRequest {
   baseRefName: string | null;
   mergedAt: string | null;
   mergeCommit: string | null;
+  reviewDecision: string | null;
+  checks: KnowledgeGitHubCheck[];
   kanbanEvidence: KnowledgeGitHubKanbanEvidence[];
 }
 

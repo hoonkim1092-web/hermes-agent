@@ -460,6 +460,19 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
     const commit = mergedPr.mergeCommit ? ` · ${mergedPr.mergeCommit.slice(0, 7)}` : "";
     return `#${mergedPr.number ?? "?"} ${mergedAt}${commit} ${mergedPr.title ?? "Untitled PR"}`;
   });
+  const mergedProvenanceLines = github.mergedPullRequests.flatMap((mergedPr) => {
+    const prLabel = `#${mergedPr.number ?? "?"}`;
+    const rows: string[] = [];
+    if (mergedPr.reviewDecision) {
+      rows.push(`${prLabel} review: ${mergedPr.reviewDecision}`);
+    }
+    rows.push(
+      ...mergedPr.checks.map(
+        (check) => `${prLabel} ${check.name}: ${check.conclusion ?? check.status ?? "pending"}`,
+      ),
+    );
+    return rows;
+  });
   const mergedEvidenceLines = github.mergedPullRequests.flatMap((mergedPr) => {
     const prLabel = `#${mergedPr.number ?? "?"}`;
     return mergedPr.kanbanEvidence.flatMap((evidence) => {
@@ -537,6 +550,12 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
             title="Merged delivery"
             empty="No recently merged pull requests found for main."
             items={mergedPrLines}
+          />
+          <NexusList
+            icon={ShieldCheck}
+            title="Merged review/checks"
+            empty="No review decisions or status checks found for merged PRs."
+            items={dedupe(mergedProvenanceLines)}
           />
           <NexusList
             icon={ShieldCheck}

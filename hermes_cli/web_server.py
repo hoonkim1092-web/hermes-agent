@@ -2198,6 +2198,8 @@ def _knowledge_normalize_merged_prs(items: Any) -> list[dict[str, Any]]:
                 "baseRefName": item.get("baseRefName"),
                 "mergedAt": item.get("mergedAt"),
                 "mergeCommit": merge_commit.get("oid"),
+                "reviewDecision": item.get("reviewDecision"),
+                "checks": _knowledge_normalize_check_rollup(item.get("statusCheckRollup")),
                 "kanbanEvidence": [],
             }
         )
@@ -2288,7 +2290,7 @@ def _knowledge_github_status(git_root: Path | None) -> dict[str, Any]:
                 "--limit",
                 "6",
                 "--json",
-                "number,url,title,headRefName,baseRefName,mergedAt,mergeCommit",
+                "number,url,title,headRefName,baseRefName,mergedAt,mergeCommit,reviewDecision,statusCheckRollup",
             ],
             cwd=str(git_root),
             text=True,
