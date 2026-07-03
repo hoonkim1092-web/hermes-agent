@@ -102,11 +102,20 @@ const PHASES: PhaseCard[] = [
   },
   {
     title: "MVP 4 — Work-state links",
-    status: "Planned",
+    status: "Applied now",
     items: [
       "Read existing Kanban tasks",
-      "Show blocked decisions and next actions",
-      "Treat Todo as current-session focus",
+      "Show blocked decisions, links, and current focus",
+      "Surface latest run and verification evidence",
+    ],
+  },
+  {
+    title: "MVP 5 — GitHub delivery status",
+    status: "Applied now",
+    items: [
+      "Read current branch PR metadata through gh",
+      "Show PR mergeability and review decision",
+      "Show PR check names and conclusions",
     ],
   },
 ];
@@ -344,10 +353,10 @@ export default function KnowledgePage() {
             </h3>
           </div>
           <ol className="grid gap-2 text-sm leading-6 text-muted-foreground md:grid-cols-2">
-            <li>1. Add a read-only Work State panel backed by existing Kanban data.</li>
-            <li>2. Link tasks to files, commits, sessions, reviews, and notes without a new task DB.</li>
-            <li>3. Show Todo only as current-session focus when that context is available.</li>
-            <li>4. Keep proposal/diff writes for a later slice after the read-only links are clear.</li>
+            <li>1. Keep Work State and Git Nexus as read-only status surfaces backed by Kanban, git, and GitHub.</li>
+            <li>2. Next small slice: surface merged delivery provenance for the main branch from recent commits or merged PRs.</li>
+            <li>3. Use Kanban task results and run verification as the durable work-state trail.</li>
+            <li>4. Keep proposal/diff writes for a later slice after the read-only delivery path is clear.</li>
           </ol>
         </CardContent>
       </Card>
