@@ -19,7 +19,7 @@ import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { api, type KnowledgeStatusResponse } from "@/lib/api";
+import { api, type KnowledgeSessionPromotionProposal, type KnowledgeStatusResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PluginSlot } from "@/plugins";
 
@@ -170,8 +170,23 @@ export default function KnowledgePage() {
   const [vaultPath, setVaultPath] = useState("");
   const [draftPath, setDraftPath] = useState("");
   const [status, setStatus] = useState<KnowledgeStatusResponse | null>(null);
+  const [proposal, setProposal] = useState<KnowledgeSessionPromotionProposal | null>(null);
+  const [proposalSessionId, setProposalSessionId] = useState("");
+  const [proposalLoading, setProposalLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const loadProposal = useCallback((sessionId = proposalSessionId) => {
+    setProposalLoading(true);
+    api
+      .getKnowledgeSessionPromotionProposal(sessionId)
+      .then((next) => {
+        setProposal(next);
+        setProposalSessionId(next.sessionId ?? sessionId);
+      })
+      .catch((err) => setError(String(err)))
+      .finally(() => setProposalLoading(false));
+  }, [proposalSessionId]);
 
   const loadStatus = useCallback((path = vaultPath) => {
     setLoading(true);
@@ -188,9 +203,12 @@ export default function KnowledgePage() {
   }, [vaultPath]);
 
   useEffect(() => {
-    queueMicrotask(() => loadStatus(""));
-    // Run once with the backend default path; manual refreshes go through the
-    // header control below.
+    queueMicrotask(() => {
+      loadStatus("");
+      loadProposal("");
+    });
+    // Run once with the backend default path/session; manual refreshes go through the
+    // header control and proposal card below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -257,6 +275,13 @@ export default function KnowledgePage() {
       {status && <VaultStatus status={status} loading={loading} />}
       {status && <GitNexusStatus status={status} />}
       {status && <WorkStateStatus status={status} />}
+      <SessionPromotionProposal
+        loading={proposalLoading}
+        proposal={proposal}
+        sessionId={proposalSessionId}
+        setSessionId={setProposalSessionId}
+        onRefresh={() => loadProposal(proposalSessionId)}
+      />
 
       <section className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <Card>
@@ -378,6 +403,96 @@ export default function KnowledgePage() {
 
       <PluginSlot name="knowledge:bottom" />
     </div>
+  );
+}
+
+function SessionPromotionProposal({
+  loading,
+  onRefresh,
+  proposal,
+  sessionId,
+  setSessionId,
+}: {
+  loading: boolean;
+  onRefresh: () => void;
+  proposal: KnowledgeSessionPromotionProposal | null;
+  sessionId: string;
+  setSessionId: (value: string) => void;
+}) {
+  const candidateLines = proposal?.candidateNotes.map(
+    (note) => `${note.path} [${note.confidence}] ${note.reason}`,
+  ) ?? [];
+  const boundaryLines = proposal
+    ? [
+        `mode: ${proposal.preview.mode}`,
+        `explicit apply required: ${proposal.preview.applyRequired ? "yes" : "no"}`,
+        ...(proposal.preview.applyEndpoint ? [`apply endpoint: ${proposal.preview.applyEndpoint}`] : []),
+        ...proposal.preview.guardrails,
+      ]
+    : [];
+  const sourceLines = proposal
+    ? [
+        ...(proposal.sessionId ? [`session ${proposal.sessionId}`] : []),
+        ...proposal.sourceSessionRefs.filter((ref) => ref !== proposal.sessionId),
+      ]
+    : [];
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 py-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <h3 className="font-sans text-display text-sm uppercase tracking-[0.16em] text-foreground">
+                Session → wiki promotion proposal
+              </h3>
+              {loading && <Spinner className="text-muted-foreground" />}
+            </div>
+            <p className="text-sm leading-6 text-muted-foreground">
+              Read-only analysis of a selected or latest Hermes session. It proposes durable wiki targets and an apply boundary without writing notes.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="h-8 w-72 max-w-[50vw] text-xs"
+              placeholder="Session id (blank: latest)"
+              value={sessionId}
+              onChange={(event) => setSessionId(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  onRefresh();
+                }
+              }}
+            />
+            <Button size="sm" outlined onClick={onRefresh} disabled={loading}>
+              {loading ? <Spinner /> : "Analyze"}
+            </Button>
+          </div>
+        </div>
+
+        {proposal?.warning && (
+          <p className="rounded border border-border bg-background/40 p-3 text-sm leading-6 text-muted-foreground">
+            {proposal.warning}
+          </p>
+        )}
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <Metric label="Messages" value={proposal?.messageCount ?? 0} />
+          <Metric label="Candidate notes" value={proposal?.candidateNotes.length ?? 0} />
+          <Metric label="Write targets" value={proposal?.preview.writeTargets.length ?? 0} />
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <NexusList icon={FileText} title="Candidate wiki notes" empty="No candidate notes yet." items={candidateLines} />
+          <NexusList icon={CheckCircle2} title="Durable decisions" empty="No durable decision snippets detected yet." items={proposal?.durableDecisions ?? []} />
+          <NexusList icon={Network} title="Sources / files / PRs" empty="No source, file, or PR references detected yet." items={dedupe([...sourceLines, ...(proposal?.affectedFiles ?? []), ...(proposal?.affectedPullRequests ?? [])])} />
+          <NexusList icon={AlertTriangle} title="Risks / conflicts" empty="No risk snippets detected yet." items={proposal?.risks ?? []} />
+          <NexusList icon={ShieldCheck} title="Preview / apply boundary" empty="No apply boundary available yet." items={boundaryLines} />
+          <NexusList icon={Inbox} title="Proposed write targets" empty="No proposed write targets yet." items={proposal?.preview.writeTargets ?? []} />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
