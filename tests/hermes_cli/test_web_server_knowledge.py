@@ -258,6 +258,15 @@ def test_knowledge_status_includes_read_only_github_pr_status(client, tmp_path, 
                             "baseRefName": "main",
                             "mergedAt": "2026-07-03T03:42:27Z",
                             "mergeCommit": {"oid": "eeb389bf26b9d75eb735d918f93e0ac753577e33"},
+                            "reviewDecision": "APPROVED",
+                            "statusCheckRollup": [
+                                {
+                                    "name": "build",
+                                    "status": "COMPLETED",
+                                    "conclusion": "SUCCESS",
+                                    "detailsUrl": "https://checks.example/build",
+                                }
+                            ],
                         }
                     ]
                 ),
@@ -289,6 +298,10 @@ def test_knowledge_status_includes_read_only_github_pr_status(client, tmp_path, 
             "baseRefName": "main",
             "mergedAt": "2026-07-03T03:42:27Z",
             "mergeCommit": "eeb389bf26b9d75eb735d918f93e0ac753577e33",
+            "reviewDecision": "APPROVED",
+            "checks": [
+                {"name": "build", "status": "COMPLETED", "conclusion": "SUCCESS", "url": "https://checks.example/build"},
+            ],
             "kanbanEvidence": [],
         }
     ]
@@ -372,6 +385,15 @@ def test_knowledge_status_links_merged_delivery_to_kanban_run_evidence(client, t
                             "baseRefName": "main",
                             "mergedAt": "2026-07-03T03:42:27Z",
                             "mergeCommit": {"oid": "eeb389bf26b9d75eb735d918f93e0ac753577e33"},
+                            "reviewDecision": "APPROVED",
+                            "statusCheckRollup": [
+                                {
+                                    "name": "build",
+                                    "status": "COMPLETED",
+                                    "conclusion": "SUCCESS",
+                                    "detailsUrl": "https://checks.example/build",
+                                }
+                            ],
                         }
                     ]
                 ),
