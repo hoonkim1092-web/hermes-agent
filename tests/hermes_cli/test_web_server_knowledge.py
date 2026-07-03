@@ -193,6 +193,71 @@ def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path,
     }
 
 
+def test_knowledge_status_includes_read_only_github_pr_status(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "missing-kanban.db"))
+    vault = tmp_path / "docs" / "wiki"
+    vault.mkdir(parents=True)
+    (vault / "SCHEMA.md").write_text("# Schema\n", encoding="utf-8")
+    (vault / "index.md").write_text("# Index\n", encoding="utf-8")
+    (vault / "log.md").write_text("# Log\n", encoding="utf-8")
+    (tmp_path / "tracked.py").write_text("print('ok')\n", encoding="utf-8")
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "remote", "add", "hoon", "https://github.com/hoonkim1092-web/hermes-agent.git"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "checkout", "-b", "feat/test-pr"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "add", "tracked.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, stdout=subprocess.DEVNULL)
+
+    original_run = web_server.subprocess.run
+
+    def fake_run(args, *run_args, **run_kwargs):
+        if args[:3] == ["gh", "pr", "view"]:
+            assert args[3] == "feat/test-pr"
+            assert args[5] == "hoonkim1092-web/hermes-agent"
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps(
+                    {
+                        "number": 7,
+                        "url": "https://github.com/hoonkim1092-web/hermes-agent/pull/7",
+                        "state": "OPEN",
+                        "title": "Add PR status",
+                        "headRefName": "feat/test-pr",
+                        "baseRefName": "main",
+                        "isDraft": False,
+                        "mergeable": "MERGEABLE",
+                        "reviewDecision": "REVIEW_REQUIRED",
+                        "statusCheckRollup": [
+                            {"name": "typecheck", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "https://checks.example/typecheck"},
+                            {"name": "tests", "status": "IN_PROGRESS", "conclusion": None},
+                        ],
+                    }
+                ),
+                stderr="",
+            )
+        return original_run(args, *run_args, **run_kwargs)
+
+    monkeypatch.setattr(web_server.shutil, "which", lambda name: "gh" if name == "gh" else shutil.which(name))
+    monkeypatch.setattr(web_server.subprocess, "run", fake_run)
+
+    body = client.get("/api/knowledge/status", params={"path": str(vault)}).json()
+
+    github = body["gitNexus"]["github"]
+    assert github["available"] is True
+    assert github["repo"] == "hoonkim1092-web/hermes-agent"
+    assert github["branch"] == "feat/test-pr"
+    assert github["pullRequest"]["number"] == 7
+    assert github["pullRequest"]["mergeable"] == "MERGEABLE"
+    assert github["checks"] == [
+        {"name": "typecheck", "status": "COMPLETED", "conclusion": "SUCCESS", "url": "https://checks.example/typecheck"},
+        {"name": "tests", "status": "IN_PROGRESS", "conclusion": None, "url": None},
+    ]
+    assert not (tmp_path / "missing-kanban.db").exists()
+
+
 def test_knowledge_status_requires_auth(tmp_path):
     unauth = TestClient(web_server.app)
 
