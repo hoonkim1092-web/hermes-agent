@@ -454,6 +454,11 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
   const checkLines = github.checks.map(
     (check) => `${check.name}: ${check.conclusion ?? check.status ?? "pending"}`,
   );
+  const mergedPrLines = github.mergedPullRequests.map((mergedPr) => {
+    const mergedAt = mergedPr.mergedAt ? mergedPr.mergedAt.slice(0, 10) : "merged";
+    const commit = mergedPr.mergeCommit ? ` · ${mergedPr.mergeCommit.slice(0, 7)}` : "";
+    return `#${mergedPr.number ?? "?"} ${mergedAt}${commit} ${mergedPr.title ?? "Untitled PR"}`;
+  });
 
   return (
     <Card>
@@ -475,7 +480,7 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
           </Badge>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+        <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-9">
           <Metric label="Dirty files" value={nexus.dirtyFiles.length} />
           <Metric label="Recent commits" value={nexus.recentCommits.length} />
           <Metric label="code_refs" value={nexus.codeRefCount} />
@@ -484,6 +489,7 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
           <Metric label="Missing commits" value={nexus.missingCommitRefs.length} />
           <Metric label="PR" value={pr ? pr.number ?? 1 : 0} />
           <Metric label="Checks" value={github.checks.length} />
+          <Metric label="Merged PRs" value={github.mergedPullRequests.length} />
         </div>
 
         <div className="grid gap-4 xl:grid-cols-3">
@@ -510,6 +516,12 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
             title="PR checks"
             empty={github.warning || "No GitHub status checks found for this PR."}
             items={checkLines}
+          />
+          <NexusList
+            icon={CheckCircle2}
+            title="Merged delivery"
+            empty="No recently merged pull requests found for main."
+            items={mergedPrLines}
           />
           <NexusList
             icon={Network}
