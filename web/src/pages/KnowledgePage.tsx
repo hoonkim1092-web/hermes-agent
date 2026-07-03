@@ -564,6 +564,20 @@ function WorkStateStatus({ status }: { status: KnowledgeStatusResponse }) {
     ...task.links.notes.map((note) => `${task.id} note ${note}`),
     ...task.links.files.map((file) => `${task.id} file ${file}`),
   ]);
+  const runEvidenceLines = work.tasks.flatMap((task) => {
+    const rows: string[] = [];
+    if (task.latestRunSummary) {
+      rows.push(`${task.id} run: ${task.latestRunSummary}`);
+    }
+    const verification = formatVerificationEvidence(task.verification);
+    if (verification) {
+      rows.push(`${task.id} verification: ${verification}`);
+    }
+    return rows;
+  });
+  const kanbanTaskEmpty = work.available
+    ? "No active Kanban tasks found. Durable project work state comes from Kanban; create tasks with `hermes kanban create`."
+    : "Kanban work state is unavailable. The dashboard only reads an existing Kanban board and will not create one while rendering.";
 
   return (
     <Card>
@@ -603,7 +617,7 @@ function WorkStateStatus({ status }: { status: KnowledgeStatusResponse }) {
           <NexusList
             icon={Workflow}
             title="Kanban tasks"
-            empty="No active Kanban tasks found."
+            empty={kanbanTaskEmpty}
             items={taskLines}
           />
           <NexusList
@@ -630,10 +644,35 @@ function WorkStateStatus({ status }: { status: KnowledgeStatusResponse }) {
             empty="No session, note, or file links found in the current summary."
             items={dedupe(sessionDocLines)}
           />
+          <NexusList
+            icon={ShieldCheck}
+            title="Run / verification evidence"
+            empty="No latest run summary or verification evidence found in Kanban task runs."
+            items={dedupe(runEvidenceLines)}
+          />
         </div>
       </CardContent>
     </Card>
   );
+}
+
+function formatVerificationEvidence(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => formatVerificationEvidence(item)).filter(Boolean).join(", ") || null;
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        const formatted = formatVerificationEvidence(item);
+        return formatted ? `${key}: ${formatted}` : null;
+      })
+      .filter(Boolean)
+      .join(" · ") || null;
+  }
+  return null;
 }
 
 function dedupe(items: string[]): string[] {
