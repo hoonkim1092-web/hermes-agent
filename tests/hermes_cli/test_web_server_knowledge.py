@@ -420,6 +420,55 @@ def test_knowledge_status_links_merged_delivery_to_kanban_run_evidence(client, t
     ]
 
 
+def test_knowledge_session_promotion_proposal_is_read_only(client, tmp_path, monkeypatch):
+    from hermes_state import SessionDB
+
+    db_path = tmp_path / "state.db"
+    session_db = SessionDB(db_path=db_path)
+    try:
+        session_db.create_session("20260703_120000_promote", "cli")
+        session_db.set_session_title("20260703_120000_promote", "Promote session notes")
+        session_db.append_message(
+            "20260703_120000_promote",
+            "user",
+            "Decision: session to wiki promotion must stay proposal-only before apply. "
+            "Touch hermes_cli/web_server.py and web/src/pages/KnowledgePage.tsx. "
+            "See PR https://github.com/hoonkim1092-web/hermes-agent/pull/12.",
+        )
+        session_db.append_message(
+            "20260703_120000_promote",
+            "assistant",
+            "Risk: writing docs/wiki automatically could conflict with existing notes. "
+            "Candidate wiki target should cover Knowledge Hub / Git Nexus session promotion.",
+        )
+    finally:
+        session_db.close()
+
+    def open_test_db(profile=None):
+        return SessionDB(db_path=db_path)
+
+    monkeypatch.setattr(web_server, "_open_session_db_for_profile", open_test_db)
+    target = tmp_path / "docs" / "wiki" / "knowledge" / "decisions" / "session-promotion.md"
+
+    body = client.get(
+        "/api/knowledge/session-promotion-proposal",
+        params={"session_id": "20260703_120000_promote"},
+    ).json()
+
+    assert body["available"] is True
+    assert body["sessionId"] == "20260703_120000_promote"
+    assert body["preview"]["mode"] == "proposal-only"
+    assert body["preview"]["applyRequired"] is True
+    assert body["preview"]["applyEndpoint"] is None
+    assert "hermes_cli/web_server.py" in body["affectedFiles"]
+    assert "web/src/pages/KnowledgePage.tsx" in body["affectedFiles"]
+    assert body["affectedPullRequests"] == ["https://github.com/hoonkim1092-web/hermes-agent/pull/12"]
+    assert any("proposal-only" in decision for decision in body["durableDecisions"])
+    assert any(note["path"] == "knowledge/decisions/session-promotion.md" for note in body["candidateNotes"])
+    assert any("automatically" in risk for risk in body["risks"])
+    assert not target.exists()
+
+
 def test_knowledge_status_requires_auth(tmp_path):
     unauth = TestClient(web_server.app)
 

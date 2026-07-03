@@ -460,6 +460,10 @@ export const api = {
     const query = path?.trim() ? `?path=${encodeURIComponent(path.trim())}` : "";
     return fetchJSON<KnowledgeStatusResponse>(`/api/knowledge/status${query}`);
   },
+  getKnowledgeSessionPromotionProposal: (sessionId?: string) => {
+    const query = sessionId?.trim() ? `?session_id=${encodeURIComponent(sessionId.trim())}` : "";
+    return fetchJSON<KnowledgeSessionPromotionProposal>(`/api/knowledge/session-promotion-proposal${query}`);
+  },
   getLogs: (params: { file?: string; lines?: number; level?: string; component?: string }) => {
     const qs = new URLSearchParams();
     if (params.file) qs.set("file", params.file);
@@ -1934,6 +1938,36 @@ export interface KnowledgeWorkState {
   };
   warning: string | null;
   currentFocus: KnowledgeCurrentFocus;
+}
+
+export interface KnowledgeSessionPromotionCandidateNote {
+  path: string;
+  title: string;
+  reason: string;
+  confidence: string;
+}
+
+export interface KnowledgeSessionPromotionPreview {
+  mode: string;
+  writeTargets: string[];
+  applyRequired: boolean;
+  applyEndpoint: string | null;
+  guardrails: string[];
+}
+
+export interface KnowledgeSessionPromotionProposal {
+  available: boolean;
+  sessionId: string | null;
+  title: string | null;
+  messageCount: number;
+  sourceSessionRefs: string[];
+  durableDecisions: string[];
+  candidateNotes: KnowledgeSessionPromotionCandidateNote[];
+  affectedFiles: string[];
+  affectedPullRequests: string[];
+  risks: string[];
+  preview: KnowledgeSessionPromotionPreview;
+  warning: string | null;
 }
 
 export interface KnowledgeStatusResponse {

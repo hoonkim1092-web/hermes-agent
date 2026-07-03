@@ -1991,6 +1991,11 @@ async def fs_default_cwd():
 _KNOWLEDGE_MAX_MARKDOWN_FILES = 2000
 _KNOWLEDGE_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 _KNOWLEDGE_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+_KNOWLEDGE_SESSION_FILE_RE = re.compile(
+    r"(?P<file>(?:[A-Za-z]:)?(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.(?:py|tsx|ts|jsx|js|md|json|yaml|yml|toml|css|html))"
+)
+_KNOWLEDGE_SESSION_PR_RE = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+")
+_KNOWLEDGE_SESSION_ID_RE = re.compile(r"(?P<session>[0-9]{8}_[0-9]{6}_[A-Za-z0-9]+|@session:[^\s)]+)")
 
 
 def _knowledge_default_vault_path() -> Path:
@@ -2581,6 +2586,171 @@ def _knowledge_work_state() -> dict[str, Any]:
     }
 
 
+def _knowledge_empty_session_promotion_proposal(warning: str) -> dict[str, Any]:
+    return {
+        "available": False,
+        "sessionId": None,
+        "title": None,
+        "messageCount": 0,
+        "sourceSessionRefs": [],
+        "durableDecisions": [],
+        "candidateNotes": [],
+        "affectedFiles": [],
+        "affectedPullRequests": [],
+        "risks": [],
+        "preview": {
+            "mode": "proposal-only",
+            "writeTargets": [],
+            "applyRequired": True,
+            "applyEndpoint": None,
+            "guardrails": [
+                "Session DB is the read-only source.",
+                "docs/wiki remains the long-term markdown target.",
+                "No files, wiki notes, NEXT_STEPS exports, branches, commits, or PRs are written by this proposal.",
+            ],
+        },
+        "warning": warning,
+    }
+
+
+def _knowledge_dedupe(items: list[str], limit: int = 8) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in items:
+        text = item.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _knowledge_sentence_candidates(text: str, keywords: tuple[str, ...], limit: int = 6) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return []
+    parts = re.split(r"(?<=[.!?。！？])\s+|\n+|(?:^|\s)[*-]\s+", normalized)
+    matches: list[str] = []
+    for part in parts:
+        sentence = part.strip(" -\t")
+        if not sentence:
+            continue
+        lower = sentence.lower()
+        if any(keyword in lower for keyword in keywords):
+            matches.append(sentence[:240])
+    return _knowledge_dedupe(matches, limit=limit)
+
+
+def _knowledge_candidate_notes_from_text(text: str) -> list[dict[str, Any]]:
+    buckets = [
+        ("knowledge/decisions/session-promotion.md", "Session promotion decisions", ("decision", "decided", "require", "guardrail", "설계", "범위", "결정")),
+        ("knowledge/concepts/knowledge-hub-git-nexus.md", "Knowledge Hub / Git Nexus", ("knowledge hub", "git nexus", "wiki", "docs/wiki", "knowledge")),
+        ("code/session-to-wiki-promotion.md", "Session-to-wiki promotion flow", ("session", "promotion", "proposal", "preview", "apply", "승격")),
+    ]
+    lowered = text.lower()
+    notes: list[dict[str, Any]] = []
+    for path, title, keywords in buckets:
+        hits = [keyword for keyword in keywords if keyword in lowered]
+        if not hits:
+            continue
+        notes.append(
+            {
+                "path": path,
+                "title": title,
+                "reason": f"Matched session terms: {', '.join(hits[:4])}.",
+                "confidence": "medium" if len(hits) >= 2 else "low",
+            }
+        )
+    return notes[:5]
+
+
+def _knowledge_session_promotion_proposal(session_id: str | None = None, profile: Optional[str] = None) -> dict[str, Any]:
+    """Build a read-only session → wiki promotion proposal preview.
+
+    This intentionally stops at analysis/preview. It does not create raw session
+    exports, markdown notes, NEXT_STEPS updates, branches, commits, or PRs.
+    """
+    db = _open_session_db_for_profile(profile)
+    try:
+        sid = db.resolve_session_id(session_id) if session_id else None
+        if not sid:
+            sessions = db.list_sessions_rich(
+                limit=1,
+                offset=0,
+                include_children=False,
+                min_message_count=1,
+                order_by_last_active=True,
+            )
+            sid = sessions[0]["id"] if sessions else None
+        if not sid:
+            return _knowledge_empty_session_promotion_proposal("No non-empty Hermes session found to analyze.")
+        sid = db.resolve_resume_session_id(sid)
+        session = db.get_session(sid)
+        if not session:
+            return _knowledge_empty_session_promotion_proposal("Session not found.")
+        messages = db.get_messages(sid)
+    finally:
+        db.close()
+
+    readable_messages = [m for m in messages if m.get("role") in {"user", "assistant"} and m.get("content")]
+    text = "\n".join(str(m.get("content") or "") for m in readable_messages[-80:])
+    decisions = _knowledge_sentence_candidates(
+        text,
+        ("decision", "decided", "require", "must", "guardrail", "scope", "api", "ui", "설계", "범위", "결정", "해야"),
+        limit=8,
+    )
+    risks = _knowledge_sentence_candidates(
+        text,
+        ("risk", "conflict", "blocked", "warning", "missing", "broken", "write", "apply", "위험", "충돌", "주의"),
+        limit=6,
+    )
+    files = _knowledge_dedupe([m.group("file").replace("\\", "/") for m in _KNOWLEDGE_SESSION_FILE_RE.finditer(text)], limit=10)
+    prs = _knowledge_dedupe(_KNOWLEDGE_SESSION_PR_RE.findall(text), limit=8)
+    source_refs = _knowledge_dedupe([sid, *[m.group("session") for m in _KNOWLEDGE_SESSION_ID_RE.finditer(text)]], limit=10)
+    candidate_notes = _knowledge_candidate_notes_from_text(text)
+    if not candidate_notes:
+        candidate_notes = [
+            {
+                "path": "raw/sessions/session-promotion-candidate.md",
+                "title": "Session promotion candidate",
+                "reason": "Session has messages but no stronger wiki topic signal was detected.",
+                "confidence": "low",
+            }
+        ]
+
+    write_targets = _knowledge_dedupe(
+        [f"docs/wiki/{note['path']}" for note in candidate_notes]
+        + [f"docs/wiki/raw/sessions/{sid}.md"],
+        limit=8,
+    )
+    return {
+        "available": True,
+        "sessionId": sid,
+        "title": session.get("title") or session.get("preview") or sid,
+        "messageCount": int(session.get("message_count") or len(messages)),
+        "sourceSessionRefs": source_refs,
+        "durableDecisions": decisions,
+        "candidateNotes": candidate_notes,
+        "affectedFiles": files,
+        "affectedPullRequests": prs,
+        "risks": risks,
+        "preview": {
+            "mode": "proposal-only",
+            "writeTargets": write_targets,
+            "applyRequired": True,
+            "applyEndpoint": None,
+            "guardrails": [
+                "Read Session DB only; do not mutate session history.",
+                "Preview candidate docs/wiki targets before any note write.",
+                "Require explicit user apply before wiki, NEXT_STEPS, branch, commit, or PR side effects.",
+            ],
+        },
+        "warning": None,
+    }
+
+
 def _knowledge_link_targets(files: list[Path], root: Path) -> set[str]:
     targets: set[str] = set()
     for path in files:
@@ -2693,6 +2863,13 @@ async def knowledge_status(path: Optional[str] = None, profile: Optional[str] = 
     with _config_profile_scope(profile):
         vault = _fs_path(raw_path) if raw_path else _knowledge_default_vault_path()
         return _knowledge_status_for(vault, raw_path or None)
+
+
+@app.get("/api/knowledge/session-promotion-proposal")
+async def knowledge_session_promotion_proposal(session_id: Optional[str] = None, profile: Optional[str] = None):
+    raw_session_id = (session_id or "").strip() or None
+    with _config_profile_scope(profile):
+        return _knowledge_session_promotion_proposal(raw_session_id, profile=profile)
 
 
 # ---------------------------------------------------------------------------
