@@ -185,6 +185,9 @@ def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path,
     assert body["workState"]["tasks"][0]["links"]["commits"] == ["28500dd"]
     assert body["workState"]["tasks"][0]["links"]["prs"] == ["https://github.com/hoonkim1092-web/hermes-agent/pull/42"]
     assert body["workState"]["tasks"][0]["links"]["sessions"] == ["20260702_231827_17187a"]
+    assert body["workState"]["tasks"][0]["latestRunSummary"] == "Checked docs/wiki/code-note.md"
+    assert body["workState"]["tasks"][0]["verification"] == {"typecheck": "pass"}
+    assert body["workState"]["tasks"][0]["links"]["files"] == ["docs/wiki/code-note.md"]
     assert body["workState"]["tasks"][1]["links"]["files"] == ["web/src/pages/KnowledgePage.tsx"]
     assert body["workState"]["currentFocus"] == {
         "available": False,
