@@ -1819,6 +1819,34 @@ export interface KnowledgeGitCommitLink {
   notes: string[];
 }
 
+export interface KnowledgeGitHubPullRequest {
+  number: number | null;
+  url: string | null;
+  state: string | null;
+  title: string | null;
+  headRefName: string | null;
+  baseRefName: string | null;
+  isDraft: boolean;
+  mergeable: string | null;
+  reviewDecision: string | null;
+}
+
+export interface KnowledgeGitHubCheck {
+  name: string;
+  status: string | null;
+  conclusion: string | null;
+  url: string | null;
+}
+
+export interface KnowledgeGitHubStatus {
+  available: boolean;
+  repo: string | null;
+  branch: string | null;
+  pullRequest: KnowledgeGitHubPullRequest | null;
+  checks: KnowledgeGitHubCheck[];
+  warning: string | null;
+}
+
 export interface KnowledgeGitNexus {
   gitRoot: string | null;
   isGitRepo: boolean;
@@ -1830,6 +1858,7 @@ export interface KnowledgeGitNexus {
   commitToNotes: KnowledgeGitCommitLink[];
   missingCodeRefs: KnowledgeGitFileLink[];
   missingCommitRefs: KnowledgeGitCommitLink[];
+  github: KnowledgeGitHubStatus;
 }
 
 export interface KnowledgeWorkStateTask {

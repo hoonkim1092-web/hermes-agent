@@ -432,6 +432,19 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
   const missingCodeRefs = nexus.missingCodeRefs.slice(0, 6);
   const missingCommitRefs = nexus.missingCommitRefs.slice(0, 6);
   const staleCount = nexus.missingCodeRefs.length + nexus.missingCommitRefs.length;
+  const github = nexus.github;
+  const pr = github.pullRequest;
+  const prLines = pr
+    ? [
+        `#${pr.number ?? "?"} [${pr.state ?? "unknown"}] ${pr.title ?? "Untitled PR"}`,
+        `${pr.headRefName ?? github.branch ?? "branch"} → ${pr.baseRefName ?? "base"}`,
+        `mergeable: ${pr.mergeable ?? "unknown"}${pr.reviewDecision ? ` · review: ${pr.reviewDecision}` : ""}`,
+        ...(pr.url ? [pr.url] : []),
+      ]
+    : [];
+  const checkLines = github.checks.map(
+    (check) => `${check.name}: ${check.conclusion ?? check.status ?? "pending"}`,
+  );
 
   return (
     <Card>
@@ -453,13 +466,15 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
           </Badge>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
           <Metric label="Dirty files" value={nexus.dirtyFiles.length} />
           <Metric label="Recent commits" value={nexus.recentCommits.length} />
           <Metric label="code_refs" value={nexus.codeRefCount} />
           <Metric label="commit refs" value={nexus.commitRefCount} />
           <Metric label="Missing files" value={nexus.missingCodeRefs.length} />
           <Metric label="Missing commits" value={nexus.missingCommitRefs.length} />
+          <Metric label="PR" value={pr ? pr.number ?? 1 : 0} />
+          <Metric label="Checks" value={github.checks.length} />
         </div>
 
         <div className="grid gap-4 xl:grid-cols-3">
@@ -474,6 +489,18 @@ function GitNexusStatus({ status }: { status: KnowledgeStatusResponse }) {
             title="Recent commits"
             empty="No commits found."
             items={latestCommits.map((commit) => `${commit.shortHash} ${commit.subject}`)}
+          />
+          <NexusList
+            icon={GitBranch}
+            title="GitHub PR"
+            empty={github.warning || "No pull request found for the current branch."}
+            items={prLines}
+          />
+          <NexusList
+            icon={ShieldCheck}
+            title="PR checks"
+            empty={github.warning || "No GitHub status checks found for this PR."}
+            items={checkLines}
           />
           <NexusList
             icon={Network}

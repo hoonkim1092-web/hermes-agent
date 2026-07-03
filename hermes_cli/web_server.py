@@ -2124,6 +2124,132 @@ def _knowledge_git_commits(git_root: Path) -> list[dict[str, str]]:
     return commits
 
 
+def _knowledge_github_owner_repo(remote_url: str) -> str | None:
+    remote = remote_url.strip()
+    if not remote:
+        return None
+    patterns = (
+        r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?$",
+        r"https?://[^@]+@github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, remote)
+        if match:
+            return f"{match.group('owner')}/{match.group('repo')}"
+    return None
+
+
+def _knowledge_git_upstream_remote(git_root: Path) -> str | None:
+    upstream = _knowledge_git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], git_root).strip()
+    if upstream and "/" in upstream:
+        return upstream.split("/", 1)[0]
+    remotes = [line.strip() for line in _knowledge_git(["remote"], git_root).splitlines() if line.strip()]
+    if "hoon" in remotes:
+        return "hoon"
+    if "origin" in remotes:
+        return "origin"
+    return remotes[0] if remotes else None
+
+
+def _knowledge_empty_github_status(repo: str | None, branch: str | None, warning: str) -> dict[str, Any]:
+    return {
+        "available": False,
+        "repo": repo,
+        "branch": branch,
+        "pullRequest": None,
+        "checks": [],
+        "warning": warning,
+    }
+
+
+def _knowledge_normalize_check_rollup(items: Any) -> list[dict[str, str | None]]:
+    if not isinstance(items, list):
+        return []
+    checks: list[dict[str, str | None]] = []
+    for item in items[:12]:
+        if not isinstance(item, dict):
+            continue
+        checks.append(
+            {
+                "name": str(item.get("name") or item.get("context") or "check"),
+                "status": item.get("status"),
+                "conclusion": item.get("conclusion") or item.get("state"),
+                "url": item.get("detailsUrl") or item.get("targetUrl") or item.get("url"),
+            }
+        )
+    return checks
+
+
+def _knowledge_github_status(git_root: Path | None) -> dict[str, Any]:
+    """Return a narrow read-only GitHub PR/check summary for the current branch."""
+    if git_root is None:
+        return _knowledge_empty_github_status(None, None, "No git repository found.")
+
+    branch = _knowledge_git(["branch", "--show-current"], git_root).strip() or None
+    remote = _knowledge_git_upstream_remote(git_root)
+    repo = None
+    if remote:
+        repo = _knowledge_github_owner_repo(_knowledge_git(["remote", "get-url", remote], git_root))
+    if repo is None:
+        repo = _knowledge_github_owner_repo(_knowledge_git(["remote", "get-url", "origin"], git_root))
+    if repo is None:
+        return _knowledge_empty_github_status(None, branch, "No GitHub remote found for the current repository.")
+    if not branch:
+        return _knowledge_empty_github_status(repo, None, "Detached HEAD; no branch PR status to query.")
+    if shutil.which("gh") is None:
+        return _knowledge_empty_github_status(repo, branch, "GitHub CLI `gh` is not installed.")
+
+    try:
+        completed = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "view",
+                branch,
+                "--repo",
+                repo,
+                "--json",
+                "number,url,state,title,headRefName,baseRefName,isDraft,mergeable,reviewDecision,statusCheckRollup",
+            ],
+            cwd=str(git_root),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _knowledge_empty_github_status(repo, branch, f"GitHub PR status unavailable: {exc}")
+    if completed.returncode != 0:
+        warning = (completed.stderr or completed.stdout or "GitHub PR status unavailable.").strip().splitlines()[-1]
+        return _knowledge_empty_github_status(repo, branch, warning)
+    try:
+        data = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        return _knowledge_empty_github_status(repo, branch, f"GitHub PR status returned invalid JSON: {exc}")
+    pr = {
+        "number": data.get("number"),
+        "url": data.get("url"),
+        "state": data.get("state"),
+        "title": data.get("title"),
+        "headRefName": data.get("headRefName"),
+        "baseRefName": data.get("baseRefName"),
+        "isDraft": bool(data.get("isDraft")),
+        "mergeable": data.get("mergeable"),
+        "reviewDecision": data.get("reviewDecision"),
+    }
+    return {
+        "available": True,
+        "repo": repo,
+        "branch": branch,
+        "pullRequest": pr,
+        "checks": _knowledge_normalize_check_rollup(data.get("statusCheckRollup")),
+        "warning": None,
+    }
+
+
 def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
     git_root = _knowledge_git_root(root)
     code_ref_count = 0
@@ -2178,6 +2304,7 @@ def _knowledge_git_nexus(root: Path, files: list[Path]) -> dict[str, Any]:
         "commitToNotes": commit_links,
         "missingCodeRefs": missing_code_refs,
         "missingCommitRefs": missing_commit_refs,
+        "github": _knowledge_github_status(git_root),
     }
 
 
