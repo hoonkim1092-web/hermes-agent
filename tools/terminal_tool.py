@@ -2703,6 +2703,7 @@ def terminal_tool(
                 "exit_code": returncode,
                 "error": None,
             }
+            evidence_summary = None
             try:
                 from agent.verification_evidence import record_terminal_result
 
@@ -2714,14 +2715,34 @@ def terminal_tool(
                     output=output,
                 )
                 if evidence:
-                    result_dict["verification_evidence"] = {
+                    evidence_summary = {
                         "status": evidence.get("status"),
                         "kind": evidence.get("kind"),
                         "scope": evidence.get("scope"),
                         "canonical_command": evidence.get("canonical_command"),
                     }
+                    result_dict["verification_evidence"] = evidence_summary
             except Exception:
                 logger.debug("verification evidence recording failed", exc_info=True)
+            try:
+                from agent.delivery_events import record_terminal_delivery_event
+
+                delivery_event = record_terminal_delivery_event(
+                    command=command,
+                    cwd=command_cwd,
+                    exit_code=returncode,
+                    output=output,
+                    verification_evidence=evidence_summary,
+                )
+                if delivery_event:
+                    result_dict["delivery_event"] = {
+                        "task_id": delivery_event.get("task_id"),
+                        "run_id": delivery_event.get("run_id"),
+                        "eventType": delivery_event.get("eventType"),
+                        "success": delivery_event.get("success"),
+                    }
+            except Exception:
+                logger.debug("delivery event recording failed", exc_info=True)
             if approval_note:
                 result_dict["approval"] = approval_note
             if exit_note:

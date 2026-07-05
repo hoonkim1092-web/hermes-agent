@@ -167,6 +167,14 @@ def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path,
                 json.dumps({"verification": {"typecheck": "pass"}}),
             ),
         )
+        kanban_db.add_comment(conn, blocked_id, "default", "PR creation needs reviewer decision.")
+        with kanban_db.write_txn(conn):
+            kanban_db.record_task_event(
+                conn,
+                blocked_id,
+                "delivery_event",
+                {"eventType": "verification_pass", "success": True, "canonicalCommand": "npm run typecheck --workspace web"},
+            )
         conn.commit()
     finally:
         conn.close()
@@ -194,6 +202,15 @@ def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path,
         "items": [],
         "warning": "Current-session Todo is not persisted as durable project work state.",
     }
+    events = body["workState"]["events"]
+    assert any(
+        event["kind"] == "delivery_event" and event["payload"]["eventType"] == "verification_pass"
+        for event in events
+    )
+    assert any(
+        event["source"] == "comment" and event["body"] == "PR creation needs reviewer decision."
+        for event in events
+    )
 
     board = client.get("/api/board/status").json()
     assert db_path.stat().st_mtime_ns == before_mtime

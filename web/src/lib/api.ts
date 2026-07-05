@@ -1952,11 +1952,25 @@ export interface ProjectControlDeliverySync {
   };
 }
 
+export interface KnowledgeWorkStateEvent {
+  id: number;
+  taskId: string;
+  taskTitle: string;
+  source: "event" | "comment";
+  kind: string;
+  payload: Record<string, unknown> | null;
+  createdAt: number;
+  runId: number | null;
+  author: string | null;
+  body: string | null;
+}
+
 export interface KnowledgeWorkState {
   available: boolean;
   board: string | null;
   dbPath: string | null;
   tasks: KnowledgeWorkStateTask[];
+  events: KnowledgeWorkStateEvent[];
   counts: {
     total: number;
     blocked: number;

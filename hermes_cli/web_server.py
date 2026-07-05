@@ -2482,6 +2482,7 @@ def _knowledge_empty_work_state(board: str | None, db_path: Path | None, warning
         "tasks": [],
         "counts": {"total": 0, "blocked": 0, "running": 0, "ready": 0, "review": 0},
         "warning": warning,
+        "events": [],
         "currentFocus": _knowledge_empty_current_focus(),
     }
 
@@ -2535,6 +2536,43 @@ def _knowledge_work_state(limit: int = 8) -> dict[str, Any]:
         counts_rows = conn.execute(
             "SELECT status, COUNT(*) AS n FROM tasks WHERE status != 'archived' GROUP BY status"
         ).fetchall()
+        event_rows = conn.execute(
+            """
+            SELECT * FROM (
+                SELECT
+                    e.id AS id,
+                    e.task_id AS task_id,
+                    t.title AS task_title,
+                    'event' AS source,
+                    e.kind AS kind,
+                    e.payload AS payload,
+                    e.created_at AS created_at,
+                    e.run_id AS run_id,
+                    NULL AS author,
+                    NULL AS body
+                FROM task_events e
+                JOIN tasks t ON t.id = e.task_id
+                WHERE t.status != 'archived'
+                UNION ALL
+                SELECT
+                    c.id AS id,
+                    c.task_id AS task_id,
+                    t.title AS task_title,
+                    'comment' AS source,
+                    'commented' AS kind,
+                    NULL AS payload,
+                    c.created_at AS created_at,
+                    NULL AS run_id,
+                    c.author AS author,
+                    c.body AS body
+                FROM task_comments c
+                JOIN tasks t ON t.id = c.task_id
+                WHERE t.status != 'archived'
+            )
+            ORDER BY created_at DESC, id DESC
+            LIMIT 30
+            """
+        ).fetchall()
     except Exception as exc:
         return _knowledge_empty_work_state(board, db_path, f"Kanban board could not be read: {exc}")
     finally:
@@ -2581,6 +2619,28 @@ def _knowledge_work_state(limit: int = 8) -> dict[str, Any]:
                 "links": _knowledge_work_links(row["title"], row["body"], row["result"], row["run_summary"]),
             }
         )
+    events: list[dict[str, Any]] = []
+    for row in event_rows:
+        payload: Any = None
+        if row["payload"]:
+            try:
+                payload = json.loads(row["payload"])
+            except Exception:
+                payload = None
+        events.append(
+            {
+                "id": row["id"],
+                "taskId": row["task_id"],
+                "taskTitle": row["task_title"],
+                "source": row["source"],
+                "kind": row["kind"],
+                "payload": payload,
+                "createdAt": row["created_at"],
+                "runId": row["run_id"],
+                "author": row["author"],
+                "body": row["body"],
+            }
+        )
     return {
         "available": True,
         "board": board,
@@ -2588,6 +2648,7 @@ def _knowledge_work_state(limit: int = 8) -> dict[str, Any]:
         "tasks": tasks,
         "counts": counts,
         "warning": None,
+        "events": events,
         "currentFocus": _knowledge_empty_current_focus(),
     }
 
