@@ -3097,6 +3097,30 @@ def list_events(conn: sqlite3.Connection, task_id: str) -> list[Event]:
     return out
 
 
+def record_task_event(
+    conn: sqlite3.Connection,
+    task_id: str,
+    kind: str,
+    payload: Optional[dict] = None,
+    *,
+    run_id: Optional[int] = None,
+) -> None:
+    """Record a task event row inside an already-open transaction.
+
+    This is the public helper for thin integrations (terminal delivery event
+    recording, dashboard-facing provenance, plugin hooks) that need to attach
+    durable evidence to the Kanban source of truth without creating a separate
+    dashboard state store.
+    """
+    now = int(time.time())
+    pl = json.dumps(payload, ensure_ascii=False) if payload else None
+    conn.execute(
+        "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (task_id, run_id, kind, pl, now),
+    )
+
+
 def _append_event(
     conn: sqlite3.Connection,
     task_id: str,
@@ -3112,13 +3136,7 @@ def _append_event(
     (task created/edited/archived, dependency promotion) leave it None
     and the row carries NULL.
     """
-    now = int(time.time())
-    pl = json.dumps(payload, ensure_ascii=False) if payload else None
-    conn.execute(
-        "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (task_id, run_id, kind, pl, now),
-    )
+    record_task_event(conn, task_id, kind, payload, run_id=run_id)
 
 
 def _end_run(

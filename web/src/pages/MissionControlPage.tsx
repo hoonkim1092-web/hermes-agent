@@ -14,7 +14,7 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { api, type ProjectControlStatus, type ProjectControlDeliverySync, type KnowledgeWorkStateTask } from "@/lib/api";
+import { api, type ProjectControlStatus, type ProjectControlDeliverySync, type KnowledgeWorkStateEvent, type KnowledgeWorkStateTask } from "@/lib/api";
 
 const MISSION_TABS = [
   ["Overview", "현재 미션과 보드 상태를 한눈에 봅니다."],
@@ -78,6 +78,7 @@ export default function MissionControlPage() {
   const blockedTasks = tasks.filter((task) => task.status === "blocked");
   const harnessTasks = tasks.filter((task) => task.verification || task.latestRunSummary).slice(0, 5);
   const artifactTasks = tasks.filter((task) => countTaskLinks(task) > 0).slice(0, 5);
+  const timelineEvents = (status?.workState.events ?? []).slice(0, 6);
 
   if (loading && !status) {
     return <Spinner className="text-2xl text-primary" />;
@@ -195,6 +196,9 @@ export default function MissionControlPage() {
             <ControlCard icon={PackageCheck} title="Artifacts">
               <TaskList tasks={artifactTasks} empty="연결된 PR/file/session artifact가 없습니다." showLinks />
             </ControlCard>
+            <ControlCard icon={Activity} title="Timeline">
+              <TimelineList events={timelineEvents} />
+            </ControlCard>
             <ControlCard icon={GitBranch} title="Mission tabs">
               <div className="grid gap-2 sm:grid-cols-2">
                 {MISSION_TABS.map(([name, hint]) => (
@@ -302,6 +306,49 @@ function TaskList({ tasks, empty, showVerification = false, showLinks = false }:
       ))}
     </div>
   );
+}
+
+function TimelineList({ events }: { events: KnowledgeWorkStateEvent[] }) {
+  if (events.length === 0) {
+    return <p className="rounded border border-dashed border-border p-3 text-xs leading-5 text-muted-foreground">Kanban task event/comment timeline이 비어 있습니다.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {events.map((event) => (
+        <article key={`${event.source}-${event.id}`} className="rounded-lg border border-border bg-background/40 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-mono-ui text-[11px] text-muted-foreground">{event.taskId}</p>
+              <p className="mt-1 truncate text-sm font-medium text-foreground">{event.taskTitle}</p>
+            </div>
+            <Badge tone={event.kind === "delivery_event" ? "success" : "outline"} className="text-[10px]">
+              {timelineKind(event)}
+            </Badge>
+          </div>
+          <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+            {timelineSummary(event)}
+          </p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function timelineKind(event: KnowledgeWorkStateEvent): string {
+  if (event.kind === "delivery_event" && event.payload?.eventType) {
+    return String(event.payload.eventType).replaceAll("_", " ");
+  }
+  return event.kind;
+}
+
+function timelineSummary(event: KnowledgeWorkStateEvent): string {
+  if (event.body) return event.body;
+  const payload = event.payload ?? {};
+  const eventType = payload.eventType ? String(payload.eventType).replaceAll("_", " ") : event.kind;
+  const success = typeof payload.success === "boolean" ? (payload.success ? "pass" : "fail") : null;
+  const command = typeof payload.canonicalCommand === "string" ? payload.canonicalCommand : typeof payload.command === "string" ? payload.command : null;
+  const url = typeof payload.url === "string" ? payload.url : null;
+  return [eventType, success, command, url].filter(Boolean).join(" · ");
 }
 
 function countTaskLinks(task: KnowledgeWorkStateTask): number {
