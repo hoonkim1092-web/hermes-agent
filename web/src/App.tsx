@@ -33,6 +33,8 @@ import {
   Globe,
   Heart,
   KeyRound,
+  LayoutDashboard,
+  ListTodo,
   Menu,
   MessageSquare,
   Package,
@@ -79,6 +81,9 @@ import FilesPage from "@/pages/FilesPage";
 import SessionsPage from "@/pages/SessionsPage";
 import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
+import MissionControlPage from "@/pages/MissionControlPage";
+import BoardPage from "@/pages/BoardPage";
+import TodoPage from "@/pages/TodoPage";
 import KnowledgePage from "@/pages/KnowledgePage";
 import ModelsPage from "@/pages/ModelsPage";
 import CronPage from "@/pages/CronPage";
@@ -135,6 +140,9 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
   "/sessions": SessionsPage,
   "/files": FilesPage,
+  "/mission-control": MissionControlPage,
+  "/board": BoardPage,
+  "/todo": TodoPage,
   "/knowledge": KnowledgePage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
@@ -169,8 +177,11 @@ const BUILTIN_NAV_REST: NavItem[] = [
     label: "Sessions",
     icon: MessageSquare,
   },
-  { path: "/files", label: "Files", icon: FolderOpen },
-  { path: "/knowledge", label: "Knowledge", icon: Database },
+  { path: "/files", labelKey: "files", label: "Files", icon: FolderOpen },
+  { path: "/mission-control", labelKey: "missionControl", label: "Mission", icon: Activity },
+  { path: "/board", labelKey: "board", label: "Board", icon: LayoutDashboard },
+  { path: "/todo", labelKey: "todo", label: "Todo", icon: ListTodo },
+  { path: "/knowledge", labelKey: "knowledge", label: "Knowledge", icon: Database },
   {
     path: "/analytics",
     labelKey: "analytics",
@@ -187,14 +198,14 @@ const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/cron", labelKey: "cron", label: "Cron", icon: Clock },
   { path: "/skills", labelKey: "skills", label: "Skills", icon: Package },
   { path: "/plugins", labelKey: "plugins", label: "Plugins", icon: Puzzle },
-  { path: "/mcp", label: "MCP", icon: Plug },
-  { path: "/channels", label: "Channels", icon: Radio },
-  { path: "/webhooks", label: "Webhooks", icon: Webhook },
-  { path: "/pairing", label: "Pairing", icon: ShieldCheck },
+  { path: "/mcp", labelKey: "mcp", label: "MCP", icon: Plug },
+  { path: "/channels", labelKey: "channels", label: "Channels", icon: Radio },
+  { path: "/webhooks", labelKey: "webhooks", label: "Webhooks", icon: Webhook },
+  { path: "/pairing", labelKey: "pairing", label: "Pairing", icon: ShieldCheck },
   { path: "/profiles", labelKey: "profiles", label: "Profiles", icon: Users },
   { path: "/config", labelKey: "config", label: "Config", icon: Settings },
   { path: "/env", labelKey: "keys", label: "Keys", icon: KeyRound },
-  { path: "/system", label: "System", icon: Wrench },
+  { path: "/system", labelKey: "system", label: "System", icon: Wrench },
   {
     path: "/docs",
     labelKey: "documentation",

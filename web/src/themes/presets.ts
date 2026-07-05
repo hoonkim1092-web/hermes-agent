@@ -54,6 +54,82 @@ export const defaultTheme: DashboardTheme = {
   terminalBackground: "#000000",
 };
 
+export const appleTheme: DashboardTheme = {
+  name: "apple",
+  label: "Apple Glass",
+  description: "밝고 여백 있는 Apple UI 스타일 — 한국어 대시보드 기본 테마",
+  palette: {
+    background: { hex: "#f5f5f7", alpha: 1 },
+    midground: { hex: "#1d1d1f", alpha: 1 },
+    foreground: { hex: "#ffffff", alpha: 0.68 },
+    warmGlow: "rgba(0, 122, 255, 0.16)",
+    noiseOpacity: 0,
+  },
+  typography: {
+    fontSans: `-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Apple SD Gothic Neo", "Noto Sans KR", ${SYSTEM_SANS}`,
+    fontMono: `"SF Mono", "JetBrains Mono", ${SYSTEM_MONO}`,
+    fontDisplay: `-apple-system, BlinkMacSystemFont, "SF Pro Display", "Apple SD Gothic Neo", "Noto Sans KR", ${SYSTEM_SANS}`,
+    baseSize: "16px",
+    lineHeight: "1.6",
+    letterSpacing: "-0.012em",
+  },
+  layout: {
+    radius: "1.25rem",
+    density: "spacious",
+  },
+  colorOverrides: {
+    card: "rgba(255,255,255,0.72)",
+    cardForeground: "#1d1d1f",
+    popover: "rgba(255,255,255,0.9)",
+    popoverForeground: "#1d1d1f",
+    primary: "#007aff",
+    primaryForeground: "#ffffff",
+    secondary: "rgba(118,118,128,0.12)",
+    secondaryForeground: "#1d1d1f",
+    muted: "rgba(118,118,128,0.10)",
+    mutedForeground: "#6e6e73",
+    accent: "rgba(0,122,255,0.12)",
+    accentForeground: "#0051d5",
+    border: "rgba(60,60,67,0.18)",
+    input: "rgba(60,60,67,0.18)",
+    ring: "#007aff",
+    success: "#34c759",
+    warning: "#ff9f0a",
+    destructive: "#ff3b30",
+  },
+  componentStyles: {
+    card: {
+      background: "rgba(255,255,255,0.72)",
+      backdropFilter: "blur(24px) saturate(180%)",
+      boxShadow: "0 18px 50px rgba(0,0,0,0.08)",
+    },
+    sidebar: {
+      background: "rgba(255,255,255,0.74)",
+      backdropFilter: "blur(28px) saturate(180%)",
+    },
+    header: {
+      background: "rgba(255,255,255,0.66)",
+      backdropFilter: "blur(24px) saturate(180%)",
+    },
+  },
+  customCSS: `
+    body {
+      background:
+        radial-gradient(circle at 14% 10%, rgba(0,122,255,0.16), transparent 28%),
+        radial-gradient(circle at 82% 0%, rgba(175,82,222,0.12), transparent 30%),
+        linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 54%, #ececf1 100%);
+    }
+    .font-display, .text-display { font-weight: 650; }
+  `,
+  terminalBackground: "#f5f5f7",
+  terminalForeground: "#1d1d1f",
+  seriesColors: {
+    inputTokenAccent: "#5856d6",
+    outputTokenAccent: "#007aff",
+  },
+  swatchColors: ["#f5f5f7", "#1d1d1f", "#007aff"],
+};
+
 export const midnightTheme: DashboardTheme = {
   name: "midnight",
   label: "Midnight",
@@ -229,6 +305,7 @@ export const defaultLargeTheme: DashboardTheme = {
 };
 
 export const BUILTIN_THEMES: Record<string, DashboardTheme> = {
+  apple: appleTheme,
   default: defaultTheme,
   "default-large": defaultLargeTheme,
   "nous-blue": nousBlueTheme,
