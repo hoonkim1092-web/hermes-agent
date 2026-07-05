@@ -92,6 +92,16 @@ export interface Translations {
       config: string;
       cron: string;
       documentation: string;
+      files?: string;
+      missionControl?: string;
+      board?: string;
+      todo?: string;
+      knowledge?: string;
+      mcp?: string;
+      channels?: string;
+      webhooks?: string;
+      pairing?: string;
+      system?: string;
       keys: string;
       logs: string;
       models: string;

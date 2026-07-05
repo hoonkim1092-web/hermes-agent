@@ -81,6 +81,9 @@ const PROFILE_SCOPED_PREFIXES = [
   "/api/model/moa",
   "/api/model/options",
   "/api/knowledge",
+  "/api/project-control",
+  "/api/board",
+  "/api/todo",
 ];
 
 function withManagementProfile(url: string): string {
@@ -464,6 +467,9 @@ export const api = {
     const query = sessionId?.trim() ? `?session_id=${encodeURIComponent(sessionId.trim())}` : "";
     return fetchJSON<KnowledgeSessionPromotionProposal>(`/api/knowledge/session-promotion-proposal${query}`);
   },
+  getProjectControlStatus: () => fetchJSON<ProjectControlStatus>("/api/project-control/status"),
+  getBoardStatus: () => fetchJSON<KnowledgeWorkState>("/api/board/status"),
+  getTodoStatus: () => fetchJSON<KnowledgeCurrentFocus>("/api/todo/status"),
   getLogs: (params: { file?: string; lines?: number; level?: string; component?: string }) => {
     const qs = new URLSearchParams();
     if (params.file) qs.set("file", params.file);
@@ -1898,6 +1904,9 @@ export interface KnowledgeWorkStateTask {
   sessionId: string | null;
   branchName: string | null;
   workspacePath: string | null;
+  createdAt?: number | null;
+  startedAt?: number | null;
+  completedAt?: number | null;
   parents: string[];
   children: string[];
   latestRunSummary: string | null;
@@ -1924,6 +1933,14 @@ export interface KnowledgeCurrentFocus {
   warning: string | null;
 }
 
+export interface ProjectControlProject {
+  name: string;
+  path: string;
+  exists: boolean;
+  markdownFiles: number;
+  keyDocs: string[];
+}
+
 export interface KnowledgeWorkState {
   available: boolean;
   board: string | null;
@@ -1935,9 +1952,21 @@ export interface KnowledgeWorkState {
     running: number;
     ready: number;
     review: number;
+    done?: number;
+    todo?: number;
   };
   warning: string | null;
   currentFocus: KnowledgeCurrentFocus;
+}
+
+export interface ProjectControlStatus {
+  vaultPath: string;
+  projectsRoot: string;
+  projectsRootExists: boolean;
+  projects: ProjectControlProject[];
+  workState: KnowledgeWorkState;
+  tabs: string[];
+  warning: string | null;
 }
 
 export interface KnowledgeSessionPromotionCandidateNote {

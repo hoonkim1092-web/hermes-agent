@@ -648,7 +648,7 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "dashboard.theme": {
         "type": "select",
         "description": "Web dashboard visual theme",
-        "options": ["default", "midnight", "ember", "mono", "cyberpunk", "rose"],
+        "options": ["apple", "default", "default-large", "nous-blue", "midnight", "ember", "mono", "cyberpunk", "rose"],
     },
     "display.resume_display": {
         "type": "select",
@@ -2486,7 +2486,7 @@ def _knowledge_empty_work_state(board: str | None, db_path: Path | None, warning
     }
 
 
-def _knowledge_work_state() -> dict[str, Any]:
+def _knowledge_work_state(limit: int = 8) -> dict[str, Any]:
     """Return a read-only Kanban-backed work-state summary for Knowledge Hub."""
     try:
         from hermes_cli import kanban_db as kb
@@ -2508,7 +2508,7 @@ def _knowledge_work_state() -> dict[str, Any]:
             SELECT
                 t.id, t.title, t.body, t.status, t.assignee, t.priority,
                 t.block_kind, t.last_failure_error, t.result, t.session_id,
-                t.branch_name, t.workspace_path, t.created_at,
+                t.branch_name, t.workspace_path, t.created_at, t.started_at, t.completed_at,
                 (SELECT GROUP_CONCAT(parent_id) FROM task_links WHERE child_id = t.id) AS parents,
                 (SELECT GROUP_CONCAT(child_id) FROM task_links WHERE parent_id = t.id) AS children,
                 r.summary AS run_summary,
@@ -2527,9 +2527,10 @@ def _knowledge_work_state() -> dict[str, Any]:
                     ELSE 4
                 END,
                 t.priority DESC,
-                t.created_at ASC
-            LIMIT 8
-            """
+                COALESCE(t.completed_at, t.started_at, t.created_at) DESC
+            LIMIT ?
+            """,
+            (max(1, min(int(limit or 8), 200)),)
         ).fetchall()
         counts_rows = conn.execute(
             "SELECT status, COUNT(*) AS n FROM tasks WHERE status != 'archived' GROUP BY status"
@@ -2543,10 +2544,12 @@ def _knowledge_work_state() -> dict[str, Any]:
     by_status = {row["status"]: int(row["n"]) for row in counts_rows}
     counts = {
         "total": sum(by_status.values()),
+        "todo": by_status.get("todo", 0),
         "blocked": by_status.get("blocked", 0),
         "running": by_status.get("running", 0),
         "ready": by_status.get("ready", 0),
         "review": by_status.get("review", 0),
+        "done": by_status.get("done", 0),
     }
     tasks: list[dict[str, Any]] = []
     for row in rows:
@@ -2568,6 +2571,9 @@ def _knowledge_work_state() -> dict[str, Any]:
                 "sessionId": row["session_id"],
                 "branchName": row["branch_name"],
                 "workspacePath": row["workspace_path"],
+                "createdAt": row["created_at"],
+                "startedAt": row["started_at"],
+                "completedAt": row["completed_at"],
                 "parents": [item for item in (row["parents"] or "").split(",") if item],
                 "children": [item for item in (row["children"] or "").split(",") if item],
                 "latestRunSummary": row["run_summary"],
@@ -2583,6 +2589,76 @@ def _knowledge_work_state() -> dict[str, Any]:
         "counts": counts,
         "warning": None,
         "currentFocus": _knowledge_empty_current_focus(),
+    }
+
+
+def _dashboard_todo_state() -> dict[str, Any]:
+    """Return the dashboard-visible Todo state.
+
+    The Todo tool is intentionally in-memory per live agent session, so the
+    dashboard cannot safely read it as durable project state. Keep this endpoint
+    explicit instead of inventing another persistence layer.
+    """
+    return _knowledge_empty_current_focus()
+
+
+def _project_control_markdown_count(path: Path, limit: int = 500) -> int:
+    if not path.is_dir():
+        return 0
+    count = 0
+    for child in path.rglob("*.md"):
+        if any(part in {".git", "node_modules", ".obsidian", ".trash"} for part in child.parts):
+            continue
+        if child.is_file():
+            count += 1
+            if count >= limit:
+                return count
+    return count
+
+
+def _project_control_key_docs(path: Path) -> list[str]:
+    candidates = [
+        "README.md",
+        "project-rules.md",
+        "test-harness.md",
+        "pitfalls.md",
+        "verified-fixes.md",
+        "wiki/index.md",
+        "wiki/code/index.md",
+        "wiki/knowledge/index.md",
+    ]
+    return [name for name in candidates if (path / name).is_file()]
+
+
+def _project_control_status() -> dict[str, Any]:
+    """Return read-only Project Control Center state for the dashboard."""
+    vault = _knowledge_default_vault_path()
+    projects_root = vault / "projects"
+    projects: list[dict[str, Any]] = []
+    if projects_root.is_dir():
+        for child in sorted(projects_root.iterdir(), key=lambda item: item.name.lower()):
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            projects.append(
+                {
+                    "name": child.name,
+                    "path": str(child.resolve()),
+                    "exists": True,
+                    "markdownFiles": _project_control_markdown_count(child),
+                    "keyDocs": _project_control_key_docs(child),
+                }
+            )
+            if len(projects) >= 50:
+                break
+    warning = None if projects_root.is_dir() else "Project knowledge root does not exist yet."
+    return {
+        "vaultPath": str(vault),
+        "projectsRoot": str(projects_root),
+        "projectsRootExists": projects_root.is_dir(),
+        "projects": projects,
+        "workState": _knowledge_work_state(limit=100),
+        "tabs": ["Overview", "Board", "Agents", "Comms", "Harness", "Artifacts", "Knowledge", "Timeline"],
+        "warning": warning,
     }
 
 
@@ -2870,6 +2946,24 @@ async def knowledge_session_promotion_proposal(session_id: Optional[str] = None,
     raw_session_id = (session_id or "").strip() or None
     with _config_profile_scope(profile):
         return _knowledge_session_promotion_proposal(raw_session_id, profile=profile)
+
+
+@app.get("/api/project-control/status")
+async def project_control_status(profile: Optional[str] = None):
+    with _config_profile_scope(profile):
+        return _project_control_status()
+
+
+@app.get("/api/board/status")
+async def board_status(profile: Optional[str] = None):
+    with _config_profile_scope(profile):
+        return _knowledge_work_state(limit=100)
+
+
+@app.get("/api/todo/status")
+async def todo_status(profile: Optional[str] = None):
+    with _config_profile_scope(profile):
+        return _dashboard_todo_state()
 
 
 # ---------------------------------------------------------------------------
@@ -13933,6 +14027,7 @@ def mount_spa(application: FastAPI):
 # Built-in dashboard themes — label + description only.  The actual color
 # definitions live in the frontend (web/src/themes/presets.ts).
 _BUILTIN_DASHBOARD_THEMES = [
+    {"name": "apple",        "label": "Apple Glass",        "description": "밝고 여백 있는 Apple UI 스타일 — 한국어 대시보드 기본 테마"},
     {"name": "default",       "label": "Hermes Teal",         "description": "Classic dark teal — the canonical Hermes look"},
     {"name": "default-large", "label": "Hermes Teal (Large)", "description": "Hermes Teal with bigger fonts and roomier spacing"},
     {"name": "nous-blue",     "label": "Nous Blue",           "description": "Light mode — vivid Nous-blue accents on cream canvas"},

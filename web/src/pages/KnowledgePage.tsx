@@ -793,9 +793,23 @@ function WorkStateStatus({ status }: { status: KnowledgeStatusResponse }) {
               {work.dbPath ?? "Kanban data unavailable"}
             </p>
           </div>
-          <Badge tone={work.available ? "success" : "outline"} className="shrink-0 text-xs">
-            {work.available ? `Board: ${work.board ?? "default"}` : "Unavailable"}
-          </Badge>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <a
+              href="/board"
+              className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+            >
+              Open Board
+            </a>
+            <a
+              href="/todo"
+              className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+            >
+              Open Todo
+            </a>
+            <Badge tone={work.available ? "success" : "outline"} className="text-xs">
+              {work.available ? `Board: ${work.board ?? "default"}` : "Unavailable"}
+            </Badge>
+          </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-5">

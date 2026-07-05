@@ -195,6 +195,63 @@ def test_knowledge_status_includes_read_only_kanban_work_state(client, tmp_path,
         "warning": "Current-session Todo is not persisted as durable project work state.",
     }
 
+    board = client.get("/api/board/status").json()
+    assert db_path.stat().st_mtime_ns == before_mtime
+    assert board["available"] is True
+    assert board["counts"]["total"] == 2
+    assert board["counts"]["blocked"] == 1
+    assert board["counts"]["ready"] == 1
+    assert {task["id"] for task in board["tasks"]} == {parent_id, blocked_id}
+    assert board["tasks"][0]["createdAt"] is not None
+
+    todo = client.get("/api/todo/status").json()
+    assert todo == {
+        "available": False,
+        "items": [],
+        "warning": "Current-session Todo is not persisted as durable project work state.",
+    }
+    assert db_path.stat().st_mtime_ns == before_mtime
+
+
+def test_board_status_keeps_missing_board_read_only(client, tmp_path, monkeypatch):
+    db_path = tmp_path / "missing-kanban.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+
+    body = client.get("/api/board/status").json()
+
+    assert body["available"] is False
+    assert body["counts"]["total"] == 0
+    assert body["tasks"] == []
+    assert not db_path.exists()
+
+
+def test_project_control_status_lists_projects_without_writing_board(client, tmp_path, monkeypatch):
+    db_path = tmp_path / "missing-kanban.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    monkeypatch.setenv("WIKI_PATH", str(tmp_path / "vault"))
+    project = tmp_path / "vault" / "projects" / "hermes-agent"
+    project.mkdir(parents=True)
+    (project / "README.md").write_text("# Hermes\n", encoding="utf-8")
+    (project / "test-harness.md").write_text("# Harness\n", encoding="utf-8")
+    (project / "notes.md").write_text("# Notes\n", encoding="utf-8")
+
+    body = client.get("/api/project-control/status").json()
+
+    assert body["vaultPath"] == str((tmp_path / "vault").resolve())
+    assert body["projectsRootExists"] is True
+    assert body["projects"] == [
+        {
+            "name": "hermes-agent",
+            "path": str(project.resolve()),
+            "exists": True,
+            "markdownFiles": 3,
+            "keyDocs": ["README.md", "test-harness.md"],
+        }
+    ]
+    assert body["workState"]["available"] is False
+    assert body["tabs"] == ["Overview", "Board", "Agents", "Comms", "Harness", "Artifacts", "Knowledge", "Timeline"]
+    assert not db_path.exists()
+
 
 def test_knowledge_status_includes_read_only_github_pr_status(client, tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "missing-kanban.db"))
