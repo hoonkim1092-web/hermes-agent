@@ -14,7 +14,7 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { api, type ProjectControlStatus, type KnowledgeWorkStateTask } from "@/lib/api";
+import { api, type ProjectControlStatus, type ProjectControlDeliverySync, type KnowledgeWorkStateTask } from "@/lib/api";
 
 const MISSION_TABS = [
   ["Overview", "현재 미션과 보드 상태를 한눈에 봅니다."],
@@ -182,6 +182,7 @@ export default function MissionControlPage() {
                 ))}
               </div>
             </ControlCard>
+            {status?.delivery && <DeliverySyncCard delivery={status.delivery} />}
             <ControlCard icon={Boxes} title="Agents">
               <TaskList tasks={runningTasks} empty="현재 running agent/task가 없습니다." />
             </ControlCard>
@@ -236,6 +237,39 @@ function ControlCard({ icon: Icon, title, children }: { icon: typeof Activity; t
       </CardHeader>
       <CardContent>{children}</CardContent>
     </Card>
+  );
+}
+
+function DeliverySyncCard({ delivery }: { delivery: ProjectControlDeliverySync }) {
+  const pr = delivery.github.pullRequest;
+  const dirtyCount = delivery.dirtyFiles.length;
+  return (
+    <ControlCard icon={GitBranch} title="Delivery Sync">
+      <div className="rounded-xl border border-border bg-background/40 p-3">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">다음 액션</p>
+        <p className="mt-1 text-sm font-medium leading-5 text-foreground">{delivery.nextAction.label}</p>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+        <p className="truncate">
+          branch: <span className="font-mono-ui text-foreground">{delivery.github.branch ?? "unknown"}</span>
+        </p>
+        <p className="truncate">
+          repo: <span className="font-mono-ui text-foreground">{delivery.github.repo ?? "unavailable"}</span>
+        </p>
+        {pr ? (
+          <a className="truncate text-primary underline-offset-4 hover:underline" href={pr.url ?? undefined} target="_blank" rel="noreferrer">
+            PR #{pr.number}: {pr.title ?? pr.state ?? "open"}
+          </a>
+        ) : (
+          <p>{delivery.github.warning ?? "현재 branch에 연결된 PR이 없습니다."}</p>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Badge tone={dirtyCount ? "warning" : "success"} className="text-[10px]">dirty {dirtyCount}</Badge>
+        {pr?.mergeable && <Badge tone="outline" className="text-[10px]">{pr.mergeable}</Badge>}
+        {delivery.github.checks.length > 0 && <Badge tone="outline" className="text-[10px]">checks {delivery.github.checks.length}</Badge>}
+      </div>
+    </ControlCard>
   );
 }
 

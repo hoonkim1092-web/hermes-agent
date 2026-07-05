@@ -249,7 +249,35 @@ def test_project_control_status_lists_projects_without_writing_board(client, tmp
         }
     ]
     assert body["workState"]["available"] is False
+    assert body["delivery"]["nextAction"]["kind"] in {"idle", "verify_and_commit", "push_or_pr", "review_merge_decision"}
     assert body["tabs"] == ["Overview", "Board", "Agents", "Comms", "Harness", "Artifacts", "Knowledge", "Timeline"]
+    assert not db_path.exists()
+
+
+def test_project_control_status_includes_read_only_delivery_sync(client, tmp_path, monkeypatch):
+    db_path = tmp_path / "missing-kanban.db"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    monkeypatch.setenv("WIKI_PATH", str(tmp_path / "vault"))
+    monkeypatch.setattr(web_server, "load_config", lambda: {"terminal": {"cwd": str(repo)}})
+
+    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+    subprocess.run(["git", "checkout", "-b", "feature/delivery-sync"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    (repo / "tracked.py").write_text("print('ok')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+    (repo / "pending.py").write_text("print('dirty')\n", encoding="utf-8")
+
+    body = client.get("/api/project-control/status").json()
+
+    assert body["delivery"]["gitRoot"] == str(repo.resolve())
+    assert body["delivery"]["github"]["branch"] == "feature/delivery-sync"
+    assert body["delivery"]["dirtyFiles"] == [{"status": "??", "path": "pending.py"}]
+    assert body["delivery"]["nextAction"]["kind"] == "verify_and_commit"
+    assert body["delivery"]["github"]["warning"] == "No GitHub remote found for the current repository."
     assert not db_path.exists()
 
 

@@ -1941,6 +1941,17 @@ export interface ProjectControlProject {
   keyDocs: string[];
 }
 
+export interface ProjectControlDeliverySync {
+  gitRoot: string | null;
+  isGitRepo: boolean;
+  dirtyFiles: KnowledgeGitDirtyFile[];
+  github: KnowledgeGitHubStatus;
+  nextAction: {
+    kind: "verify_and_commit" | "review_merge_decision" | "push_or_pr" | "idle";
+    label: string;
+  };
+}
+
 export interface KnowledgeWorkState {
   available: boolean;
   board: string | null;
@@ -1965,6 +1976,7 @@ export interface ProjectControlStatus {
   projectsRootExists: boolean;
   projects: ProjectControlProject[];
   workState: KnowledgeWorkState;
+  delivery: ProjectControlDeliverySync;
   tabs: string[];
   warning: string | null;
 }
