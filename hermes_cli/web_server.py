@@ -2630,6 +2630,34 @@ def _project_control_key_docs(path: Path) -> list[str]:
     return [name for name in candidates if (path / name).is_file()]
 
 
+def _project_control_delivery_sync() -> dict[str, Any]:
+    """Return read-only delivery state from Git/GitHub, not dashboard inference."""
+    git_root = _knowledge_git_root(Path(_fs_default_cwd()))
+    dirty_files = _knowledge_git_status(git_root) if git_root else []
+    github = _knowledge_github_status(git_root)
+    pr = github.get("pullRequest") if isinstance(github.get("pullRequest"), dict) else None
+    branch = github.get("branch")
+    if dirty_files:
+        next_action = "verify_and_commit"
+        next_label = "변경사항 검증 후 commit/PR 동기화가 필요합니다."
+    elif pr:
+        next_action = "review_merge_decision"
+        next_label = "열린 PR의 review/merge 결정이 필요합니다."
+    elif branch and branch != "main":
+        next_action = "push_or_pr"
+        next_label = "현재 branch를 push하거나 PR로 연결하세요."
+    else:
+        next_action = "idle"
+        next_label = "현재 repo 기준 대기 중인 delivery action이 없습니다."
+    return {
+        "gitRoot": str(git_root) if git_root else None,
+        "isGitRepo": git_root is not None,
+        "dirtyFiles": dirty_files,
+        "github": github,
+        "nextAction": {"kind": next_action, "label": next_label},
+    }
+
+
 def _project_control_status() -> dict[str, Any]:
     """Return read-only Project Control Center state for the dashboard."""
     vault = _knowledge_default_vault_path()
@@ -2657,6 +2685,7 @@ def _project_control_status() -> dict[str, Any]:
         "projectsRootExists": projects_root.is_dir(),
         "projects": projects,
         "workState": _knowledge_work_state(limit=100),
+        "delivery": _project_control_delivery_sync(),
         "tabs": ["Overview", "Board", "Agents", "Comms", "Harness", "Artifacts", "Knowledge", "Timeline"],
         "warning": warning,
     }
