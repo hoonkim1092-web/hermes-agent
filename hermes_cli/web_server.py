@@ -2509,7 +2509,9 @@ def _knowledge_work_state(limit: int = 8) -> dict[str, Any]:
             SELECT
                 t.id, t.title, t.body, t.status, t.assignee, t.priority,
                 t.block_kind, t.last_failure_error, t.result, t.session_id,
-                t.branch_name, t.workspace_path, t.created_at, t.started_at, t.completed_at,
+                t.branch_name, t.workspace_path, t.project_id, t.tenant,
+                t.worker_pid, t.last_heartbeat_at, t.current_run_id,
+                t.created_at, t.started_at, t.completed_at,
                 (SELECT GROUP_CONCAT(parent_id) FROM task_links WHERE child_id = t.id) AS parents,
                 (SELECT GROUP_CONCAT(child_id) FROM task_links WHERE parent_id = t.id) AS children,
                 r.summary AS run_summary,
@@ -2609,6 +2611,11 @@ def _knowledge_work_state(limit: int = 8) -> dict[str, Any]:
                 "sessionId": row["session_id"],
                 "branchName": row["branch_name"],
                 "workspacePath": row["workspace_path"],
+                "projectId": row["project_id"],
+                "tenant": row["tenant"],
+                "workerPid": row["worker_pid"],
+                "lastHeartbeatAt": row["last_heartbeat_at"],
+                "currentRunId": row["current_run_id"],
                 "createdAt": row["created_at"],
                 "startedAt": row["started_at"],
                 "completedAt": row["completed_at"],
@@ -2691,6 +2698,119 @@ def _project_control_key_docs(path: Path) -> list[str]:
     return [name for name in candidates if (path / name).is_file()]
 
 
+def _project_control_task_project(task: dict[str, Any], projects: list[dict[str, Any]]) -> str:
+    """Best-effort project bucket for read-only Mission Control views."""
+    project_names = {project["name"] for project in projects}
+    for key in ("projectId", "tenant"):
+        value = task.get(key)
+        if value in project_names:
+            return str(value)
+    workspace_path = task.get("workspacePath")
+    if workspace_path:
+        try:
+            workspace = Path(str(workspace_path)).resolve()
+            for project in projects:
+                project_path = Path(project["path"]).resolve()
+                if workspace == project_path or project_path in workspace.parents:
+                    return project["name"]
+        except Exception:
+            pass
+    text = " ".join(
+        str(task.get(key) or "")
+        for key in ("title", "workspacePath", "branchName", "sessionId")
+    ).lower()
+    for project in projects:
+        if project["name"].lower() in text:
+            return project["name"]
+    return "unassigned"
+
+
+def _project_control_event_summary(event: dict[str, Any]) -> str:
+    if event.get("body"):
+        return str(event["body"])
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    event_type = str(payload.get("eventType") or event.get("kind") or "event")
+    message = payload.get("message") or payload.get("summary")
+    command = payload.get("canonicalCommand") or payload.get("command")
+    url = payload.get("url")
+    success = payload.get("success")
+    parts = [event_type.replace("_", " ")]
+    if isinstance(success, bool):
+        parts.append("pass" if success else "fail")
+    if message:
+        parts.append(str(message))
+    if command:
+        parts.append(str(command))
+    if url:
+        parts.append(str(url))
+    return " · ".join(parts)
+
+
+def _project_control_agent_ops(work_state: dict[str, Any], projects: list[dict[str, Any]]) -> dict[str, Any]:
+    """Derive project-scoped agent/queue/comms view from Kanban read-only state."""
+    project_names = [project["name"] for project in projects] + ["unassigned"]
+    buckets: dict[str, dict[str, Any]] = {
+        name: {
+            "name": name,
+            "activeAgents": [],
+            "queuedAgents": [],
+            "comms": [],
+            "liveTranscript": [],
+        }
+        for name in project_names
+    }
+    task_to_project: dict[str, str] = {}
+    task_to_agent: dict[str, str] = {}
+    for task in work_state.get("tasks", []):
+        project_name = _project_control_task_project(task, projects)
+        if project_name not in buckets:
+            project_name = "unassigned"
+        task_id = str(task.get("id") or "")
+        task_to_project[task_id] = project_name
+        agent = task.get("assignee") or "unassigned"
+        task_to_agent[task_id] = str(agent)
+        item = {
+            "agent": agent,
+            "taskId": task.get("id"),
+            "taskTitle": task.get("title"),
+            "status": task.get("status"),
+            "currentRunId": task.get("currentRunId"),
+            "workerPid": task.get("workerPid"),
+            "lastHeartbeatAt": task.get("lastHeartbeatAt"),
+            "startedAt": task.get("startedAt"),
+            "workspacePath": task.get("workspacePath"),
+            "summary": task.get("latestRunSummary"),
+        }
+        if task.get("status") == "running":
+            buckets[project_name]["activeAgents"].append(item)
+        elif task.get("status") in {"triage", "todo", "scheduled", "ready", "review"}:
+            buckets[project_name]["queuedAgents"].append(item)
+    for event in work_state.get("events", []):
+        task_id = str(event.get("taskId") or "")
+        project_name = task_to_project.get(task_id, "unassigned")
+        if project_name not in buckets:
+            project_name = "unassigned"
+        speaker = event.get("author") or task_to_agent.get(task_id) or event.get("kind") or "system"
+        line = {
+            "id": event.get("id"),
+            "taskId": event.get("taskId"),
+            "taskTitle": event.get("taskTitle"),
+            "speaker": speaker,
+            "kind": event.get("kind"),
+            "source": event.get("source"),
+            "createdAt": event.get("createdAt"),
+            "text": _project_control_event_summary(event),
+        }
+        buckets[project_name]["comms"].append(line)
+        buckets[project_name]["liveTranscript"].append(line)
+    return {
+        "available": bool(work_state.get("available")),
+        "generatedAt": int(time.time()),
+        "projects": list(buckets.values()),
+        "warning": None if work_state.get("available") else work_state.get("warning"),
+    }
+
+
 def _project_control_delivery_sync() -> dict[str, Any]:
     """Return read-only delivery state from Git/GitHub, not dashboard inference."""
     git_root = _knowledge_git_root(Path(_fs_default_cwd()))
@@ -2740,12 +2860,14 @@ def _project_control_status() -> dict[str, Any]:
             if len(projects) >= 50:
                 break
     warning = None if projects_root.is_dir() else "Project knowledge root does not exist yet."
+    work_state = _knowledge_work_state(limit=100)
     return {
         "vaultPath": str(vault),
         "projectsRoot": str(projects_root),
         "projectsRootExists": projects_root.is_dir(),
         "projects": projects,
-        "workState": _knowledge_work_state(limit=100),
+        "workState": work_state,
+        "agentOps": _project_control_agent_ops(work_state, projects),
         "delivery": _project_control_delivery_sync(),
         "tabs": ["Overview", "Board", "Agents", "Comms", "Harness", "Artifacts", "Knowledge", "Timeline"],
         "warning": warning,
