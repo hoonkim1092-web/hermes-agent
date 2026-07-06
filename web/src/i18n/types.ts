@@ -92,6 +92,7 @@ export interface Translations {
       config: string;
       cron: string;
       documentation: string;
+      agents?: string;
       files?: string;
       missionControl?: string;
       board?: string;

@@ -1304,6 +1304,7 @@ export const en: Translations = {
   sidebar: {
     nav: {
       'new-session': 'New session',
+      agents: 'Agents',
       skills: 'Skills & Tools',
       messaging: 'Messaging',
       artifacts: 'Artifacts'

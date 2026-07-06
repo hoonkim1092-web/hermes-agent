@@ -68,6 +68,7 @@ export const ko: Translations = {
     },
     nav: {
       analytics: "분석",
+      agents: "에이전트",
       board: "보드",
       chat: "채팅",
       channels: "채널",

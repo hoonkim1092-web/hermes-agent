@@ -1484,6 +1484,7 @@ export const zh: Translations = {
   sidebar: {
     nav: {
       'new-session': '新建会话',
+      agents: '代理',
       skills: '技能与工具',
       messaging: '消息平台',
       artifacts: '产物'

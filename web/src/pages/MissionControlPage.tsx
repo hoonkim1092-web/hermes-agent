@@ -6,15 +6,26 @@ import {
   GitBranch,
   MessageSquare,
   PackageCheck,
+  Radio,
   RefreshCw,
   ShieldCheck,
+  Users,
 } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { api, type ProjectControlStatus, type ProjectControlDeliverySync, type KnowledgeWorkStateEvent, type KnowledgeWorkStateTask } from "@/lib/api";
+import {
+  api,
+  type KnowledgeWorkStateEvent,
+  type KnowledgeWorkStateTask,
+  type ProjectControlAgentItem,
+  type ProjectControlAgentProjectOps,
+  type ProjectControlDeliverySync,
+  type ProjectControlStatus,
+  type ProjectControlTranscriptLine,
+} from "@/lib/api";
 
 const MISSION_TABS = [
   ["Overview", "현재 미션과 보드 상태를 한눈에 봅니다."],
@@ -74,6 +85,10 @@ export default function MissionControlPage() {
     [selectedProject, status?.projects],
   );
   const tasks = status?.workState.tasks ?? [];
+  const selectedOps =
+    status?.agentOps.projects.find((project) => project.name === selected?.name) ??
+    status?.agentOps.projects.find((project) => project.name === "unassigned") ??
+    null;
   const runningTasks = tasks.filter((task) => task.status === "running");
   const blockedTasks = tasks.filter((task) => task.status === "blocked");
   const harnessTasks = tasks.filter((task) => task.verification || task.latestRunSummary).slice(0, 5);
@@ -184,6 +199,12 @@ export default function MissionControlPage() {
               </div>
             </ControlCard>
             {status?.delivery && <DeliverySyncCard delivery={status.delivery} />}
+            <ControlCard icon={Users} title="Project Agents">
+              <AgentOpsCard ops={selectedOps} />
+            </ControlCard>
+            <ControlCard icon={Radio} title="Live STT / 타이핑 로그">
+              <LiveTranscript lines={selectedOps?.liveTranscript ?? []} />
+            </ControlCard>
             <ControlCard icon={Boxes} title="Agents">
               <TaskList tasks={runningTasks} empty="현재 running agent/task가 없습니다." />
             </ControlCard>
@@ -274,6 +295,91 @@ function DeliverySyncCard({ delivery }: { delivery: ProjectControlDeliverySync }
         {delivery.github.checks.length > 0 && <Badge tone="outline" className="text-[10px]">checks {delivery.github.checks.length}</Badge>}
       </div>
     </ControlCard>
+  );
+}
+
+function AgentOpsCard({ ops }: { ops: ProjectControlAgentProjectOps | null }) {
+  const active = ops?.activeAgents ?? [];
+  const queued = ops?.queuedAgents ?? [];
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl border border-border bg-background/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">작업 중 에이전트</p>
+            <Badge tone={active.length ? "warning" : "outline"} className="text-[10px]">{active.length}</Badge>
+          </div>
+          <AgentList agents={active} empty="현재 이 프로젝트에서 작업 중인 에이전트가 없습니다." />
+        </div>
+        <div className="rounded-xl border border-border bg-background/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">대기열 에이전트</p>
+            <Badge tone={queued.length ? "secondary" : "outline"} className="text-[10px]">{queued.length}</Badge>
+          </div>
+          <AgentList agents={queued} empty="대기열에 배정된 에이전트가 없습니다." />
+        </div>
+      </div>
+      <p className="text-[11px] leading-5 text-muted-foreground">
+        프로젝트 매칭은 Kanban task의 project_id, tenant, workspace_path, 제목을 읽어서 분류합니다. 별도 dashboard DB는 만들지 않습니다.
+      </p>
+    </div>
+  );
+}
+
+function AgentList({ agents, empty }: { agents: ProjectControlAgentItem[]; empty: string }) {
+  if (agents.length === 0) {
+    return <p className="mt-2 text-xs leading-5 text-muted-foreground">{empty}</p>;
+  }
+  return (
+    <div className="mt-2 space-y-2">
+      {agents.slice(0, 4).map((agent) => (
+        <article key={`${agent.taskId}-${agent.agent}-${agent.status}`} className="rounded-lg border border-border bg-card/60 p-2.5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{agent.agent ?? "unassigned"}</p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">{agent.taskTitle ?? "작업 제목 없음"}</p>
+            </div>
+            <Badge tone={agent.status === "running" ? "warning" : "outline"} className="text-[10px]">
+              {agent.status ?? "queued"}
+            </Badge>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+            {agent.taskId && <Badge tone="outline" className="text-[10px]">{agent.taskId}</Badge>}
+            {agent.workerPid && <Badge tone="outline" className="text-[10px]">pid {agent.workerPid}</Badge>}
+            {agent.currentRunId && <Badge tone="outline" className="text-[10px]">run {agent.currentRunId}</Badge>}
+          </div>
+          {agent.summary && <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{agent.summary}</p>}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function LiveTranscript({ lines }: { lines: ProjectControlTranscriptLine[] }) {
+  if (lines.length === 0) {
+    return (
+      <p className="rounded border border-dashed border-border p-3 text-xs leading-5 text-muted-foreground">
+        아직 이 프로젝트의 agent comms/comment/event가 없습니다. 작업이 진행되면 Kanban 이벤트와 댓글을 실시간 타이핑 로그처럼 보여줍니다.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {lines.slice(0, 6).map((line) => (
+        <article key={`${line.source}-${line.id}-${line.taskId}`} className="rounded-lg border border-border bg-background/40 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-foreground">{line.speaker ?? "system"}</p>
+              <p className="mt-0.5 truncate font-mono-ui text-[10px] text-muted-foreground">{line.taskId ?? "no-task"}</p>
+            </div>
+            <Badge tone={line.source === "comment" ? "secondary" : "outline"} className="text-[10px]">
+              {line.kind ?? line.source ?? "event"}
+            </Badge>
+          </div>
+          <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{line.text}</p>
+        </article>
+      ))}
+    </div>
   );
 }
 

@@ -102,6 +102,8 @@ def test_knowledge_status_reports_read_only_vault_health(client, tmp_path, monke
 
 
 def test_knowledge_status_defaults_to_project_docs_wiki(client, tmp_path, monkeypatch):
+    monkeypatch.delenv("WIKI_PATH", raising=False)
+    monkeypatch.delenv("OBSIDIAN_VAULT_PATH", raising=False)
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "missing-kanban.db"))
     vault = tmp_path / "repo" / "docs" / "wiki"
     vault.mkdir(parents=True)
@@ -266,9 +268,81 @@ def test_project_control_status_lists_projects_without_writing_board(client, tmp
         }
     ]
     assert body["workState"]["available"] is False
+    assert body["agentOps"]["available"] is False
+    assert body["agentOps"]["projects"][0]["name"] == "hermes-agent"
+    assert body["agentOps"]["projects"][0]["activeAgents"] == []
     assert body["delivery"]["nextAction"]["kind"] in {"idle", "verify_and_commit", "push_or_pr", "review_merge_decision"}
     assert body["tabs"] == ["Overview", "Board", "Agents", "Comms", "Harness", "Artifacts", "Knowledge", "Timeline"]
     assert not db_path.exists()
+
+
+def test_project_control_status_groups_agent_ops_by_project(client, tmp_path, monkeypatch):
+    db_path = tmp_path / "kanban.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    monkeypatch.setenv("WIKI_PATH", str(tmp_path / "vault"))
+    project = tmp_path / "vault" / "projects" / "hermes-agent"
+    project.mkdir(parents=True)
+    (project / "README.md").write_text("# Hermes\n", encoding="utf-8")
+
+    conn = kanban_db.connect(db_path=db_path)
+    try:
+        running_id = kanban_db.create_task(
+            conn,
+            title="hermes-agent implement agent ops dashboard",
+            body="Show agent comms for hermes-agent.",
+            assignee="builder",
+            tenant="hermes-agent",
+            initial_status="running",
+            priority=10,
+        )
+        conn.execute("UPDATE tasks SET status = ? WHERE id = ?", ("running", running_id))
+        queued_id = kanban_db.create_task(
+            conn,
+            title="hermes-agent review queued worker",
+            assignee="reviewer",
+            tenant="hermes-agent",
+            initial_status="running",
+            priority=5,
+        )
+        conn.execute("UPDATE tasks SET status = ? WHERE id = ?", ("ready", queued_id))
+        now = int(time.time())
+        cursor = conn.execute(
+            """
+            INSERT INTO task_runs (task_id, profile, status, worker_pid, last_heartbeat_at, started_at, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (running_id, "builder", "running", 1234, now, now, "타이핑 로그 UI 구현 중"),
+        )
+        run_id = cursor.lastrowid
+        conn.execute(
+            "UPDATE tasks SET current_run_id = ?, worker_pid = ?, last_heartbeat_at = ? WHERE id = ?",
+            (run_id, 1234, now, running_id),
+        )
+        kanban_db.add_comment(conn, running_id, "builder", "Research Agent → Builder: project_id는 Kanban tenant로 분류")
+        with kanban_db.write_txn(conn):
+            kanban_db.record_task_event(
+                conn,
+                running_id,
+                "agent_message",
+                {"eventType": "agent_message", "message": "Harness Agent requested verification"},
+                run_id=run_id,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    before_mtime = db_path.stat().st_mtime_ns
+    body = client.get("/api/project-control/status").json()
+
+    assert db_path.stat().st_mtime_ns == before_mtime
+    hermes_ops = next(project for project in body["agentOps"]["projects"] if project["name"] == "hermes-agent")
+    assert hermes_ops["activeAgents"][0]["agent"] == "builder"
+    assert hermes_ops["activeAgents"][0]["taskId"] == running_id
+    assert hermes_ops["activeAgents"][0]["workerPid"] == 1234
+    assert hermes_ops["queuedAgents"][0]["agent"] == "reviewer"
+    assert hermes_ops["queuedAgents"][0]["taskId"] == queued_id
+    assert any("Research Agent" in line["text"] for line in hermes_ops["liveTranscript"])
+    assert any(line["kind"] == "agent_message" and "Harness Agent" in line["text"] for line in hermes_ops["comms"])
 
 
 def test_project_control_status_includes_read_only_delivery_sync(client, tmp_path, monkeypatch):

@@ -1904,6 +1904,11 @@ export interface KnowledgeWorkStateTask {
   sessionId: string | null;
   branchName: string | null;
   workspacePath: string | null;
+  projectId?: string | null;
+  tenant?: string | null;
+  workerPid?: number | null;
+  lastHeartbeatAt?: number | null;
+  currentRunId?: number | null;
   createdAt?: number | null;
   startedAt?: number | null;
   completedAt?: number | null;
@@ -1984,12 +1989,52 @@ export interface KnowledgeWorkState {
   currentFocus: KnowledgeCurrentFocus;
 }
 
+export interface ProjectControlAgentItem {
+  agent: string | null;
+  taskId: string | null;
+  taskTitle: string | null;
+  status: string | null;
+  currentRunId: number | null;
+  workerPid: number | null;
+  lastHeartbeatAt: number | null;
+  startedAt: number | null;
+  workspacePath: string | null;
+  summary: string | null;
+}
+
+export interface ProjectControlTranscriptLine {
+  id: number | null;
+  taskId: string | null;
+  taskTitle: string | null;
+  speaker: string | null;
+  kind: string | null;
+  source: string | null;
+  createdAt: number | null;
+  text: string;
+}
+
+export interface ProjectControlAgentProjectOps {
+  name: string;
+  activeAgents: ProjectControlAgentItem[];
+  queuedAgents: ProjectControlAgentItem[];
+  comms: ProjectControlTranscriptLine[];
+  liveTranscript: ProjectControlTranscriptLine[];
+}
+
+export interface ProjectControlAgentOps {
+  available: boolean;
+  generatedAt: number;
+  projects: ProjectControlAgentProjectOps[];
+  warning: string | null;
+}
+
 export interface ProjectControlStatus {
   vaultPath: string;
   projectsRoot: string;
   projectsRootExists: boolean;
   projects: ProjectControlProject[];
   workState: KnowledgeWorkState;
+  agentOps: ProjectControlAgentOps;
   delivery: ProjectControlDeliverySync;
   tabs: string[];
   warning: string | null;

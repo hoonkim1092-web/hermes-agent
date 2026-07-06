@@ -1365,6 +1365,7 @@ export const zhHant = defineLocale({
   sidebar: {
     nav: {
       'new-session': '新工作階段',
+      agents: '代理',
       skills: '技能與工具',
       messaging: '訊息平台',
       artifacts: '成品'
