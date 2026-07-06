@@ -82,6 +82,7 @@ import SessionsPage from "@/pages/SessionsPage";
 import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import MissionControlPage from "@/pages/MissionControlPage";
+import AgentsPage from "@/pages/AgentsPage";
 import BoardPage from "@/pages/BoardPage";
 import TodoPage from "@/pages/TodoPage";
 import KnowledgePage from "@/pages/KnowledgePage";
@@ -141,6 +142,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/sessions": SessionsPage,
   "/files": FilesPage,
   "/mission-control": MissionControlPage,
+  "/agents": AgentsPage,
   "/board": BoardPage,
   "/todo": TodoPage,
   "/knowledge": KnowledgePage,
@@ -179,6 +181,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
   },
   { path: "/files", labelKey: "files", label: "Files", icon: FolderOpen },
   { path: "/mission-control", labelKey: "missionControl", label: "Mission", icon: Activity },
+  { path: "/agents", labelKey: "agents", label: "Agents", icon: Users },
   { path: "/board", labelKey: "board", label: "Board", icon: LayoutDashboard },
   { path: "/todo", labelKey: "todo", label: "Todo", icon: ListTodo },
   { path: "/knowledge", labelKey: "knowledge", label: "Knowledge", icon: Database },
