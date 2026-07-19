@@ -61,6 +61,31 @@ class TestTavilyRequest:
                 with pytest.raises(_httpx.HTTPStatusError):
                     _tavily_request("search", {"query": "test"})
 
+    def test_plan_limit_retries_once_in_keyless_mode(self):
+        """HTTP 432 plan exhaustion falls back to Tavily's free keyless mode."""
+        import httpx as _httpx
+
+        request = _httpx.Request("POST", "https://api.tavily.com/search")
+        exhausted = _httpx.Response(
+            432,
+            request=request,
+            json={"detail": {"error": "This request exceeds your plan's set usage limit."}},
+        )
+        keyless = _httpx.Response(200, request=request, json={"results": []})
+
+        with patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-exhausted"}):
+            with patch("tools.web_tools.httpx.post", side_effect=[exhausted, keyless]) as mock_post:
+                from tools.web_tools import _tavily_request
+
+                result = _tavily_request("search", {"query": "test"})
+
+        assert result == {"results": []}
+        assert mock_post.call_count == 2
+        first_call, retry_call = mock_post.call_args_list
+        assert first_call.kwargs["json"]["api_key"] == "tvly-exhausted"
+        assert "api_key" not in retry_call.kwargs["json"]
+        assert retry_call.kwargs["headers"] == {"X-Tavily-Access-Mode": "keyless"}
+
 
 # ─── _normalize_tavily_search_results ─────────────────────────────────────────
 
