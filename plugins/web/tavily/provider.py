@@ -55,6 +55,18 @@ def _tavily_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("Tavily %s request to %s", endpoint, url)
 
     response = httpx.post(url, json=payload, timeout=60)
+    if response.status_code == 432:
+        logger.warning(
+            "Tavily API plan limit reached; retrying once with free keyless access"
+        )
+        keyless_payload = dict(payload)
+        keyless_payload.pop("api_key", None)
+        response = httpx.post(
+            url,
+            json=keyless_payload,
+            headers={"X-Tavily-Access-Mode": "keyless"},
+            timeout=60,
+        )
     response.raise_for_status()
     return response.json()
 
